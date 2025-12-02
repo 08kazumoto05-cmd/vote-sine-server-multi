@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>理解度アンケート（管理者画面）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container admin-container">
+
+    <!-- ロック画面（パスワード入力） -->
+    <div id="lock-screen">
+      <h1>管理者ログイン</h1>
+      <p>パスワードを入力してください。</p>
+      <input
+        id="admin-password"
+        type="password"
+        placeholder="admin パスワード"
+      />
+      <button id="btn-unlock" class="btn">ログイン</button>
+      <p id="lock-message" class="message"></p>
+    </div>
+
+    <!-- 管理画面本体 -->
+    <div id="admin-content" style="display: none;">
+      <h1>理解度アンケート 管理画面</h1>
+
+      <p id="time-indicator" class="small-note">
+        現在時刻：
+      </p>
+
+      <!-- ★ テーマ設定＆表示 -->
+      <section class="panel">
+        <h2>アンケートテーマ</h2>
+        <p id="theme-info" class="small-note">現在のテーマ：未設定</p>
+        <input
+          id="theme-input"
+          type="text"
+          placeholder="例）第3章：AIの基礎"
+          style="width: 100%; max-width: 400px;"
+        />
+        <button id="btn-save-theme" class="btn">テーマを保存</button>
+      </section>
+
+      <!-- 想定投票人数 -->
+      <section class="panel">
+        <h2>想定投票人数</h2>
+        <p id="max-participants-info" class="small-note">
+          想定人数は未設定です（0人）
+        </p>
+        <input
+          id="max-participants-input"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          placeholder="0〜100 の人数を入力"
+          style="width: 120px;"
+        />
+        <button id="btn-save-max" class="btn">人数を保存</button>
+      </section>
+
+      <!-- 集計情報 -->
+      <section class="panel">
+        <h2>投票状況</h2>
+        <p>理解できた：<span id="num-understood">0</span> 人</p>
+        <p>あまり理解できなかった：<span id="num-not-understood">0</span> 人</p>
+        <p>合計：<span id="num-total">0</span> 人</p>
+        <p>「理解できた」の割合：<span id="rate-understood">0%</span></p>
+      </section>
+
+      <!-- 理解度％推移グラフ -->
+      <section class="panel">
+        <h2>理解度％の推移（時間軸）</h2>
+        <canvas id="sineCanvas" width="800" height="300"></canvas>
+       <!-- 前回リセットまでのグラフ表示エリア -->
+<section class="card">
+  <h2>前回リセットまでの理解度推移</h2>
+  <canvas id="prevChart" width="600" height="160"></canvas>
+  <p id="prevChart-note" class="small-note">
+    まだ前回分のグラフはありません。
+  </p>
+</section>
+
+
+        <p class="small-note">
+          ※横軸は時間：直近は秒単位、やや前は5秒単位、それより前は10秒単位に集約して表示しています。
+        </p>
+      </section>
+
+      <!-- コメント一覧 -->
+      <section class="panel">
+        <h2>コメント一覧（最新が上）</h2>
+        <div id="comment-list" class="comment-list"></div>
+      </section>
+
+      <!-- リセットボタン -->
+      <section class="panel">
+        <h2>管理者操作</h2>
+        <button id="btn-reset" class="btn danger">
+          全ての投票・コメント・履歴をリセットする
+        </button>
+        <p class="small-note">
+          ※テーマはリセットしても残ります（必要なら手動で消してください）。
+        </p>
+      </section>
+    </div>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>

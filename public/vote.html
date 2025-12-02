@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>理解度アンケート（投票画面）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>理解度アンケート</h1>
+
+    <!-- ★ テーマ表示（管理者が設定した内容が出る） -->
+    <h2 id="theme-title" class="theme-title"></h2>
+
+    <p class="desc">
+      今の説明について、あなたの理解度を教えてください。<br />
+      この画面では結果やグラフ・コメント一覧は表示されません（管理者のみ確認できます）。
+    </p>
+
+    <div class="vote-box">
+      <button id="btn-understood" class="btn understood">
+        理解できた
+      </button>
+      <button id="btn-not-understood" class="btn not-understood">
+        あまり理解できなかった
+      </button>
+      <p id="message" class="message"></p>
+    </div>
+
+    <p class="note-anon">
+      ※この投票は匿名で集計され、誰が投票したか個人が特定されることはありません。
+    </p>
+
+    <div class="comment-input-box">
+      <p class="desc">
+        任意：感想やわかりにくかった点があれば、自由にコメントを書いてください。<br />
+        （コメントは管理者だけが確認します）
+      </p>
+      <textarea
+        id="comment-text"
+        rows="4"
+        placeholder="例）図の説明が少し早かったです など"
+      ></textarea>
+      <p class="small-note">
+        このコメントは投票とセットで送信されます。
+      </p>
+    </div>
+  </div>
+
+  <script src="vote.js"></script>
+</body>
+</html>
