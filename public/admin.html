@@ -2,110 +2,156 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>理解度アンケート（管理者画面）</title>
+  <title>理解度アンケート 管理画面</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <div class="container admin-container">
-
-    <!-- ロック画面（パスワード入力） -->
-    <div id="lock-screen">
-      <h1>管理者ログイン</h1>
-      <p>パスワードを入力してください。</p>
+<body class="admin-body">
+  <!-- ロック画面 -->
+  <div id="lock-screen" class="admin-lock-screen">
+    <div class="admin-lock-panel">
+      <h1 class="logo">Understanding Monitor</h1>
+      <p class="lock-desc">
+        管理者パスワードを入力してください。
+      </p>
       <input
         id="admin-password"
         type="password"
-        placeholder="admin パスワード"
+        class="input-text"
+        placeholder="管理者パスワード"
       />
-      <button id="btn-unlock" class="btn">ログイン</button>
-      <p id="lock-message" class="message"></p>
+      <button id="btn-unlock" class="btn primary wide">ログイン</button>
+      <p id="lock-message" class="lock-message"></p>
     </div>
+  </div>
 
-    <!-- 管理画面本体 -->
-    <div id="admin-content" style="display: none;">
-      <h1>理解度アンケート 管理画面</h1>
+  <!-- 管理画面本体 -->
+  <div id="admin-content" class="admin-shell" style="display:none;">
+    <div class="admin-bg-glow"></div>
 
-      <p id="time-indicator" class="small-note">
-        現在時刻：
-      </p>
-
-      <!-- ★ テーマ設定＆表示 -->
-      <section class="panel">
-        <h2>アンケートテーマ</h2>
-        <p id="theme-info" class="small-note">現在のテーマ：未設定</p>
-        <input
-          id="theme-input"
-          type="text"
-          placeholder="例）第3章：AIの基礎"
-          style="width: 100%; max-width: 400px;"
-        />
-        <button id="btn-save-theme" class="btn">テーマを保存</button>
-      </section>
-
-      <!-- 想定投票人数 -->
-      <section class="panel">
-        <h2>想定投票人数</h2>
-        <p id="max-participants-info" class="small-note">
-          想定人数は未設定です（0人）
+    <header class="admin-header">
+      <div>
+        <h1 class="admin-title">理解度アンケート 管理画面</h1>
+        <p class="admin-subtitle">
+          集計された投票・理解度の推移・コメントをリアルタイムでモニタリングします。
         </p>
-        <input
-          id="max-participants-input"
-          type="number"
-          min="0"
-          max="100"
-          step="1"
-          placeholder="0〜100 の人数を入力"
-          style="width: 120px;"
-        />
-        <button id="btn-save-max" class="btn">人数を保存</button>
+      </div>
+      <div class="header-meta">
+        <span id="time-indicator" class="time-indicator">現在時刻：--:--:--</span>
+      </div>
+    </header>
+
+    <main class="admin-main">
+      <!-- 左カラム：設定エリア -->
+      <section class="admin-panel">
+        <!-- テーマ設定 -->
+        <div class="card neon">
+          <h2 class="card-title">アンケートテーマ</h2>
+          <p id="theme-info" class="card-caption">現在のテーマ：未設定</p>
+          <div class="field-row">
+            <input
+              id="theme-input"
+              type="text"
+              class="input-text flex-1"
+              placeholder="例）連結会計の基礎 / 国際政治学1 など"
+            />
+            <button id="btn-save-theme" class="btn ghost">
+              テーマを保存
+            </button>
+          </div>
+        </div>
+
+        <!-- 想定投票人数 -->
+        <div class="card">
+          <h2 class="card-title">想定投票人数</h2>
+          <p id="max-participants-info" class="card-caption">
+            想定人数は未設定です（0人）
+          </p>
+          <div class="field-row">
+            <input
+              id="max-participants-input"
+              type="number"
+              min="0"
+              max="100"
+              class="input-text small"
+              placeholder="0〜100"
+            />
+            <button id="btn-save-max" class="btn ghost">
+              人数を保存
+            </button>
+          </div>
+        </div>
+
+        <!-- リセット -->
+        <div class="card danger">
+          <h2 class="card-title">投票データのリセット</h2>
+          <p class="card-caption">
+            全ての票・コメント・履歴をリセットします。<br />
+            前回までのグラフは下部に保存されます。
+          </p>
+          <button id="btn-reset" class="btn danger wide">
+            投票データをリセット
+          </button>
+        </div>
       </section>
 
-      <!-- 集計情報 -->
-      <section class="panel">
-        <h2>投票状況</h2>
-        <p>理解できた：<span id="num-understood">0</span> 人</p>
-        <p>あまり理解できなかった：<span id="num-not-understood">0</span> 人</p>
-        <p>合計：<span id="num-total">0</span> 人</p>
-        <p>「理解できた」の割合：<span id="rate-understood">0%</span></p>
+      <!-- 右カラム：メインダッシュボード -->
+      <section class="admin-dashboard">
+        <!-- サマリーカード -->
+        <div class="summary-grid">
+          <div class="summary-card">
+            <span class="label">理解できた</span>
+            <span id="num-understood" class="value">0</span>
+            <span class="unit">票</span>
+          </div>
+          <div class="summary-card">
+            <span class="label">あまり理解できなかった</span>
+            <span id="num-not-understood" class="value">0</span>
+            <span class="unit">票</span>
+          </div>
+          <div class="summary-card">
+            <span class="label">合計</span>
+            <span id="num-total" class="value">0</span>
+            <span class="unit">票</span>
+          </div>
+          <div class="summary-card accent">
+            <span class="label">理解率</span>
+            <span id="rate-understood" class="value">0%</span>
+          </div>
+        </div>
+
+        <!-- グラフエリア -->
+        <div class="card large">
+          <div class="card-header-row">
+            <h2 class="card-title">理解度％の推移（現在セッション）</h2>
+            <span class="card-caption">
+              直近は秒単位、その後は5秒・10秒単位にまとめて表示されます。
+            </span>
+          </div>
+          <canvas id="sineCanvas" width="900" height="260"></canvas>
+        </div>
+
+        <!-- 前回セッションのグラフ -->
+        <div class="card">
+          <div class="card-header-row">
+            <h2 class="card-title">前回リセットまでの理解度推移</h2>
+            <span id="prevChart-note" class="card-caption">
+              まだ前回分のグラフはありません。
+            </span>
+          </div>
+          <canvas id="prevChart" width="900" height="140"></canvas>
+        </div>
+
+        <!-- コメント一覧 -->
+        <div class="card">
+          <h2 class="card-title">コメントタイムライン</h2>
+          <p class="card-caption">
+            新しいコメントが上に表示されます。
+          </p>
+          <div id="comment-list" class="comment-list"></div>
+        </div>
       </section>
-
-      <!-- 理解度％推移グラフ -->
-      <section class="panel">
-        <h2>理解度％の推移（時間軸）</h2>
-        <canvas id="sineCanvas" width="800" height="300"></canvas>
-       <!-- 前回リセットまでのグラフ表示エリア -->
-<section class="card">
-  <h2>前回リセットまでの理解度推移</h2>
-  <canvas id="prevChart" width="600" height="160"></canvas>
-  <p id="prevChart-note" class="small-note">
-    まだ前回分のグラフはありません。
-  </p>
-</section>
-
-
-        <p class="small-note">
-          ※横軸は時間：直近は秒単位、やや前は5秒単位、それより前は10秒単位に集約して表示しています。
-        </p>
-      </section>
-
-      <!-- コメント一覧 -->
-      <section class="panel">
-        <h2>コメント一覧（最新が上）</h2>
-        <div id="comment-list" class="comment-list"></div>
-      </section>
-
-      <!-- リセットボタン -->
-      <section class="panel">
-        <h2>管理者操作</h2>
-        <button id="btn-reset" class="btn danger">
-          全ての投票・コメント・履歴をリセットする
-        </button>
-        <p class="small-note">
-          ※テーマはリセットしても残ります（必要なら手動で消してください）。
-        </p>
-      </section>
-    </div>
+    </main>
   </div>
 
   <script src="admin.js"></script>
