@@ -74,21 +74,26 @@ async function fetchResults() {
     numTotal.textContent = total;
 
     // ===== 理解できた％（グラフ＆表示用） =====
-    // 想定人数が設定されているとき：
-    //   rate = understood / maxP * 100
-    // 想定人数が0：
-    //   rate = understood / (understood + notUnderstood) * 100
-    // 投票が0のとき：
-    //   0% スタート（履歴があれば前回値を維持してもいいが、今回は 0 にする）
-    let rate;
-    if (maxP > 0) {
-      rate = Math.round((u / maxP) * 100);
-      rate = Math.min(100, Math.max(0, rate));
-    } else if (total > 0) {
-      rate = Math.round((u / total) * 100);
-    } else {
-      rate = 0;
-    }
+// 新式 : (理解できた − 理解できなかった) ÷ 想定人数
+let rate;
+
+if (maxP > 0) {
+    rate = Math.round(((u - n) / maxP) * 100);
+
+    // 0〜100%にクリップ（必要なら -100〜100 にすることも可能）
+    if (rate > 100) rate = 100;
+    if (rate < 0) rate = 0;
+
+} else if (total > 0) {
+    // 想定人数が0のときは差分 ÷ 総投票数（代替式）
+    rate = Math.round(((u - n) / total) * 100);
+    if (rate > 100) rate = 100;
+    if (rate < 0) rate = 0;
+
+} else {
+    rate = 0;
+}
+
 
     // サマリーカードにも同じ値を表示
     rateUnderstood.textContent = rate + "%";
