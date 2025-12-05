@@ -336,20 +336,44 @@ btnSaveTheme.addEventListener("click", async () => {
 
 // ================= 投票リセット =================
 
-btnReset.addEventListener("click", async () => {
-  const ok = confirm("本当にリセットしますか？");
-  if (!ok) return;
+if (btnReset) {
+  btnReset.addEventListener("click", async () => {
+    const ok = confirm("本当に全ての投票・コメント・履歴をリセットしますか？");
+    if (!ok) return;
 
-  const last = history[history.length - 1];
-  const lastRate = last ? last.rate : 0;
+    try {
+      // ★ リセット前の履歴を退避して「前回リセットまでのグラフ」に使う
+      //    （1本線版なので rate だけあればOK）
+      prevHistory = history.map((p) => ({
+        ts: p.ts,
+        rate: p.rate
+      }));
 
-  await fetch("/api/admin/reset", { method: "POST" });
+      // 前回グラフを描画（drawPrevChart がある場合）
+      if (typeof drawPrevChart === "function") {
+        drawPrevChart();
+      }
 
-  prevHistory = history.map(p => ({ ts: p.ts, rate: p.rate }));
-  history = [{ ts: Date.now(), rate: lastRate }];
+      // サーバー側の投票データをリセット
+      const res = await fetch("/api/admin/reset", { method: "POST" });
+      if (!res.ok) {
+        throw new Error("failed to reset");
+      }
 
-  alert("投票データをリセットしました。");
-});
+      // ★ 現在セッションの履歴は「完全に空」にする
+      //    → リセット直後は線が1本も表示されない
+      history = [];
+
+      // 最新の値を取り直し（票数などの表示更新）
+      await fetchResults();
+
+      alert("投票データをリセットしました。");
+    } catch (e) {
+      console.error(e);
+      alert("リセットに失敗しました。時間をおいて再度お試しください。");
+    }
+  });
+}
 
 
 // ================= ログイン =================
