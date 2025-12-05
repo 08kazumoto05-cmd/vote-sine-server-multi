@@ -1,9 +1,10 @@
 // admin.js - 管理画面
-// 線は1本のみ（青）
+// 線は1本のみ
 // 式：
 //   想定人数 > 0 のとき   (理解できた − 理解できなかった) ÷ 想定人数 ×100
 //   想定人数 = 0 のとき   (理解できた − 理解できなかった) ÷ (理解+不理解) ×100
 // マイナスは0にクリップ、100超えは100
+// リセット回数：0回 → 青 / 1回 → 赤 / 2回以上 → 緑
 
 const ADMIN_PASSWORD = "admin123";
 
@@ -42,6 +43,10 @@ const prevNote = document.getElementById("prevChart-note");
 let history = [];      // 現在セッション { ts, rate }
 let prevHistory = [];  // 前回セッション { ts, rate }
 let animationStarted = false;
+
+// ★ 何回「投票データをリセット」したか（ページを開いている間だけ記憶）
+let resetCount = 0;
+
 
 // ================= 結果取得 =================
 
@@ -119,6 +124,7 @@ async function fetchResults() {
   }
 }
 
+
 // ================= 履歴管理 =================
 
 function addRatePoint(rate) {
@@ -134,6 +140,7 @@ function addRatePoint(rate) {
     history = history.slice(-200);
   }
 }
+
 
 // ================= グラフ描画（現在セッション：1本線） =================
 
@@ -186,8 +193,16 @@ function drawLineChart() {
   const n = history.length;
   const stepX = n > 1 ? plotW / (n - 1) : 0;
 
-  // 青線 1本
-  ctx.strokeStyle = "#1976d2";
+  // ★ リセット回数で色を変える
+  let lineColor = "#1976d2"; // 初期：青
+  if (resetCount === 1) {
+    lineColor = "#e53935";  // 1回目リセット後：赤
+  } else if (resetCount >= 2) {
+    lineColor = "#43a047";  // 2回目以降：緑
+  }
+
+  // 青/赤/緑 の 1本線
+  ctx.strokeStyle = lineColor;
   ctx.lineWidth = 2;
   ctx.beginPath();
 
@@ -249,6 +264,7 @@ function drawLineChart() {
 
   requestAnimationFrame(drawLineChart);
 }
+
 
 // ================= 前回セッションのグラフ描画 =================
 
@@ -318,6 +334,7 @@ function drawPrevChart() {
   prevCtx.stroke();
 }
 
+
 // ================= コメント表示 =================
 
 function renderComments(comments) {
@@ -364,6 +381,7 @@ function renderComments(comments) {
     });
 }
 
+
 // ================= 時刻表示 =================
 
 function updateTimeLabel() {
@@ -371,6 +389,7 @@ function updateTimeLabel() {
     "現在時刻：" +
     new Date().toLocaleTimeString("ja-JP", { hour12: false });
 }
+
 
 // ================= 想定人数保存 =================
 
@@ -393,6 +412,7 @@ if (btnSaveMax) {
   });
 }
 
+
 // ================= テーマ保存 =================
 
 if (btnSaveTheme) {
@@ -408,6 +428,7 @@ if (btnSaveTheme) {
     alert("テーマを保存しました。");
   });
 }
+
 
 // ================= 投票リセット =================
 
@@ -428,8 +449,11 @@ if (btnReset) {
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // 現在セッションの履歴はクリア
+      // 現在セッションの履歴はクリア → 線が消える
       history = [];
+
+      // ★ リセット回数をカウントアップ
+      resetCount += 1;
 
       // 表示を最新に
       await fetchResults();
@@ -441,6 +465,7 @@ if (btnReset) {
     }
   });
 }
+
 
 // ================= ログイン =================
 
@@ -468,4 +493,3 @@ function unlock() {
 
   drawPrevChart();
 }
-
