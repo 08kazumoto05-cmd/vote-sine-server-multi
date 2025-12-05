@@ -6,7 +6,8 @@
 // マイナスは0にクリップ、100超えは100
 // 線の色：セッション番号 0回目=青 / 1回目=赤 / 2回目以降=緑
 // 終了したセッションを最大3回まで保存して小さいグラフに表示
-// さらに「全投票データ完全リセット」ボタンで全部まっさらにする
+// 「全投票データ完全リセット」ボタンはサーバーの /api/admin/reset を呼びつつ
+// フロント側の履歴・リセット回数も全部クリアする
 
 const ADMIN_PASSWORD = "admin123";
 
@@ -51,7 +52,7 @@ const prevNote3 = document.getElementById("prevChart-note3");
 
 // 現在セッションの履歴
 let history = []; // { ts, rate }
-// 過去セッション（最大3件）: 先頭が一番新しい
+// 過去セッション（最大3件）：先頭が一番新しい
 // { index: セッション番号, color: 線の色, data: [{ts,rate}] }
 let pastHistories = [];
 
@@ -519,9 +520,8 @@ if (btnResetAll) {
     if (!ok) return;
 
     try {
-      const res = await fetch("/api/admin/reset-all", {
-        method: "POST",
-      });
+      // サーバー側の投票データもリセット（reset API を使い回し）
+      const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset-all");
 
       // クライアント側データも全クリア
@@ -567,7 +567,7 @@ function unlock() {
   adminContent.style.display = "block";
 
   fetchResults();
-  // 500msごとに更新（1秒より遅延を少なく）
+  // 500msごとに更新（時差を少しでも小さく）
   setInterval(fetchResults, 500);
 
   if (!animationStarted) {
