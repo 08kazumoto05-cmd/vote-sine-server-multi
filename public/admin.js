@@ -468,3 +468,4 @@ function unlock() {
 
   drawPrevChart();
 }
+
