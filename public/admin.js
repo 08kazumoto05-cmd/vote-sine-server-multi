@@ -5,7 +5,8 @@
 //   想定人数 = 0 のとき   (理解できた − 理解できなかった) ÷ (理解+不理解) ×100
 // マイナスは0にクリップ、100超えは100
 // 線の色：セッション番号 0回目=青 / 1回目=赤 / 2回目以降=緑
-// さらに、終了したセッションを最大3回分まで保存して小さいグラフに表示
+// 終了したセッションを最大3回まで保存して小さいグラフに表示
+// さらに「全投票データ完全リセット」ボタンで全部まっさらにする
 
 const ADMIN_PASSWORD = "admin123";
 
@@ -31,12 +32,13 @@ const btnSaveMax = document.getElementById("btn-save-max");
 const maxInfo = document.getElementById("max-participants-info");
 
 const btnReset = document.getElementById("btn-reset");
+const btnResetAll = document.getElementById("btn-reset-all");
 
 const themeInput = document.getElementById("theme-input");
 const btnSaveTheme = document.getElementById("btn-save-theme");
 const themeInfo = document.getElementById("theme-info");
 
-// ★ 過去3セッション表示用キャンバス
+// 過去3セッション用
 const prevCanvas1 = document.getElementById("prevChart1");
 const prevCanvas2 = document.getElementById("prevChart2");
 const prevCanvas3 = document.getElementById("prevChart3");
@@ -47,15 +49,17 @@ const prevNote1 = document.getElementById("prevChart-note1");
 const prevNote2 = document.getElementById("prevChart-note2");
 const prevNote3 = document.getElementById("prevChart-note3");
 
-// 現在セッション
+// 現在セッションの履歴
 let history = []; // { ts, rate }
-// 過去セッション: 先頭が一番新しい終了セッション
-// 要素: { index: セッション番号(0,1,2,...), color: 線の色, data: [{ts,rate}] }
+// 過去セッション（最大3件）: 先頭が一番新しい
+// { index: セッション番号, color: 線の色, data: [{ts,rate}] }
 let pastHistories = [];
 
 let animationStarted = false;
+// fetch が重なるのを防ぐフラグ
+let isFetchingResults = false;
 
-// ★ リセット回数：localStorage から読み込む（なければ 0）
+// リセット回数：localStorage から読み込み
 let resetCount = 0;
 try {
   const stored = localStorage.getItem("vote_reset_count");
@@ -69,20 +73,22 @@ try {
   console.warn("resetCount の読み込みに失敗:", e);
 }
 
-// 線の色をセッション番号から決める
+// セッション番号から線の色を決める
 function getLineColor(sessionIndex) {
   if (sessionIndex === 0) return "#1976d2"; // 青
   if (sessionIndex === 1) return "#e53935"; // 赤
-  return "#43a047"; // 緑（2回目以降）
+  return "#43a047"; // 緑
 }
 
-// ================= 結果取得 =================
+// ================ 結果取得 ================
 
 async function fetchResults() {
+  if (isFetchingResults) return;
+  isFetchingResults = true;
+
   try {
     const res = await fetch("/api/results");
     if (!res.ok) throw new Error("failed to fetch results");
-
     const data = await res.json();
 
     const u = data.understood || 0;
@@ -95,25 +101,19 @@ async function fetchResults() {
     numNotUnderstood.textContent = n;
     numTotal.textContent = total;
 
-    // 表示用（従来の理解率）
+    // 表示用理解率（従来通り）
     rateUnderstood.textContent =
       total > 0 ? Math.round((u / total) * 100) + "%" : "0%";
 
-    // ======== グラフ用 1本線の計算 ========
+    // グラフ用1本線：(理解−不理解)/分母×100
     let rate;
-
     if (total === 0) {
-      // まだ投票が無い
       rate = 0;
     } else if (maxP > 0) {
-      // 想定人数を分母
       rate = Math.round(((u - n) / maxP) * 100);
     } else {
-      // 想定人数が未設定 → 実投票数を分母
       rate = Math.round(((u - n) / total) * 100);
     }
-
-    // 0〜100 にクリップ（マイナスは0）
     if (rate < 0) rate = 0;
     if (rate > 100) rate = 100;
 
@@ -121,7 +121,6 @@ async function fetchResults() {
     if (document.activeElement !== maxInput) {
       maxInput.value = maxP;
     }
-
     maxInfo.textContent =
       maxP > 0
         ? `想定人数：${maxP}人中、${total}人が投票済み`
@@ -135,10 +134,10 @@ async function fetchResults() {
       themeInput.value = theme;
     }
 
-    // コメント描画
+    // コメント
     renderComments(data.comments || []);
 
-    // 履歴追加
+    // 履歴に追加
     addRatePoint(rate);
 
     if (!animationStarted) {
@@ -149,31 +148,29 @@ async function fetchResults() {
     updateTimeLabel();
   } catch (e) {
     console.error(e);
+  } finally {
+    isFetchingResults = false;
   }
 }
 
-// ================= 履歴管理 =================
+// ================ 履歴管理 ================
 
 function addRatePoint(rate) {
   const now = Date.now();
   const last = history[history.length - 1];
-
-  // 同じ値が続くなら追加しない
   if (last && last.rate === rate) return;
 
   history.push({ ts: now, rate });
-
   if (history.length > 200) {
     history = history.slice(-200);
   }
 }
 
-// ================= グラフ描画（現在セッション：1本線） =================
+// ================ 現在セッションのグラフ描画 ================
 
 function drawLineChart() {
   const w = canvas.width;
   const h = canvas.height;
-
   ctx.clearRect(0, 0, w, h);
 
   if (history.length === 0) {
@@ -204,7 +201,6 @@ function drawLineChart() {
   ctx.font = "10px sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
-
   [0, 25, 50, 75, 100].forEach((v) => {
     const y = h - B - (v / 100) * plotH;
     ctx.fillText(v + "%", L - 6, y);
@@ -215,14 +211,12 @@ function drawLineChart() {
     ctx.stroke();
   });
 
-  // X方向
   const n = history.length;
   const stepX = n > 1 ? plotW / (n - 1) : 0;
 
-  // ★ 現在セッションの線の色（リセット回数で決める）
+  // 線の色（リセット回数で決定）
   const lineColor = getLineColor(resetCount);
 
-  // 線を描画
   ctx.strokeStyle = lineColor;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -233,7 +227,6 @@ function drawLineChart() {
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
-
   ctx.stroke();
 
   // 時刻ラベル
@@ -286,7 +279,7 @@ function drawLineChart() {
   requestAnimationFrame(drawLineChart);
 }
 
-// ================= 過去3セッションのグラフ描画 =================
+// ================ 過去3セッションのグラフ描画 ================
 
 function drawPastCharts() {
   const slots = [
@@ -336,7 +329,6 @@ function drawPastCharts() {
     ctx.font = "9px sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-
     [0, 25, 50, 75, 100].forEach((v) => {
       const y = h - B - (v / 100) * plotH;
       ctx.fillText(v + "%", L - 4, y);
@@ -350,7 +342,6 @@ function drawPastCharts() {
     const n = hist.data.length;
     const stepX = n > 1 ? plotW / (n - 1) : 0;
 
-    // 線（そのセッションの色）
     ctx.strokeStyle = hist.color;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -364,7 +355,7 @@ function drawPastCharts() {
     ctx.stroke();
 
     if (note) {
-      const labelIndex = hist.index + 1; // 1,2,3,...
+      const labelIndex = hist.index + 1;
       const colorLabel =
         hist.color === "#1976d2"
           ? "青"
@@ -376,7 +367,7 @@ function drawPastCharts() {
   });
 }
 
-// ================= コメント表示 =================
+// ================ コメント表示 ================
 
 function renderComments(comments) {
   commentList.innerHTML = "";
@@ -422,7 +413,7 @@ function renderComments(comments) {
     });
 }
 
-// ================= 時刻表示 =================
+// ================ 時刻表示 ================
 
 function updateTimeLabel() {
   timeIndicator.textContent =
@@ -430,12 +421,11 @@ function updateTimeLabel() {
     new Date().toLocaleTimeString("ja-JP", { hour12: false });
 }
 
-// ================= 想定人数保存 =================
+// ================ 想定人数保存 ================
 
 if (btnSaveMax) {
   btnSaveMax.addEventListener("click", async () => {
     const num = Number(maxInput.value);
-
     if (!Number.isFinite(num) || num < 0 || num > 100) {
       alert("0〜100 の範囲で人数を入力してください。");
       return;
@@ -451,7 +441,7 @@ if (btnSaveMax) {
   });
 }
 
-// ================= テーマ保存 =================
+// ================ テーマ保存 ================
 
 if (btnSaveTheme) {
   btnSaveTheme.addEventListener("click", async () => {
@@ -467,33 +457,30 @@ if (btnSaveTheme) {
   });
 }
 
-// ================= 投票リセット =================
+// ================ セッションリセット（過去セッションに保存） ================
 
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
-    const ok = confirm("本当に全ての投票・コメント・履歴をリセットしますか？");
+    const ok = confirm(
+      "本当に全ての投票・コメント・履歴をリセットしますか？（過去3セッションの保存は残ります）"
+    );
     if (!ok) return;
 
     try {
-      // ★ 今までのセッションを pastHistories に保存
+      // 現在セッションを pastHistories に保存
       if (history.length > 0) {
-        const sessionIndex = resetCount; // このセッションの番号
+        const sessionIndex = resetCount;
         const color = getLineColor(sessionIndex);
         const copyData = history.map((p) => ({ ts: p.ts, rate: p.rate }));
 
-        // 先頭に追加（直近の終了セッションが index 0）
         pastHistories.unshift({
           index: sessionIndex,
           color,
           data: copyData,
         });
-
-        // 最大3件まで
         if (pastHistories.length > 3) {
           pastHistories = pastHistories.slice(0, 3);
         }
-
-        // 小さいグラフを再描画
         drawPastCharts();
       }
 
@@ -501,10 +488,10 @@ if (btnReset) {
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // 現在セッションの履歴はクリア
+      // 現在セッションを空に
       history = [];
 
-      // ★ リセット回数をカウントアップ＆localStorageに保存
+      // リセット回数アップ＋保存
       resetCount += 1;
       try {
         localStorage.setItem("vote_reset_count", String(resetCount));
@@ -512,10 +499,9 @@ if (btnReset) {
         console.warn("resetCount の保存に失敗:", e);
       }
 
-      // 表示を最新に
       await fetchResults();
 
-      alert("投票データをリセットしました。");
+      alert("投票データをリセットしました。（過去セッションに保存されました）");
     } catch (e) {
       console.error(e);
       alert("リセットに失敗しました。時間をおいて再度お試しください。");
@@ -523,7 +509,48 @@ if (btnReset) {
   });
 }
 
-// ================= ログイン =================
+// ================ 全投票データ完全リセット ================
+
+if (btnResetAll) {
+  btnResetAll.addEventListener("click", async () => {
+    const ok = confirm(
+      "【注意】すべての投票データ・コメント・履歴・過去3セッションのグラフを完全に削除します。よろしいですか？"
+    );
+    if (!ok) return;
+
+    try {
+      const res = await fetch("/api/admin/reset-all", {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("failed to reset-all");
+
+      // クライアント側データも全クリア
+      history = [];
+      pastHistories = [];
+      resetCount = 0;
+      try {
+        localStorage.removeItem("vote_reset_count");
+      } catch (e) {
+        console.warn("resetCount の削除に失敗:", e);
+      }
+
+      // 小さいグラフもクリア
+      drawPastCharts();
+
+      // メインキャンバスもクリア
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      await fetchResults();
+
+      alert("全ての投票データを完全にリセットしました。");
+    } catch (e) {
+      console.error(e);
+      alert("完全リセットに失敗しました。時間をおいて再度お試しください。");
+    }
+  });
+}
+
+// ================ ログイン処理 ================
 
 btnUnlock.addEventListener("click", unlock);
 pwInput.addEventListener("keydown", (e) => {
@@ -540,13 +567,13 @@ function unlock() {
   adminContent.style.display = "block";
 
   fetchResults();
-  setInterval(fetchResults, 1000);
+  // 500msごとに更新（1秒より遅延を少なく）
+  setInterval(fetchResults, 500);
 
   if (!animationStarted) {
     animationStarted = true;
     requestAnimationFrame(drawLineChart);
   }
 
-  // 過去セッション（初回は空なので「まだありません」表示）
   drawPastCharts();
 }

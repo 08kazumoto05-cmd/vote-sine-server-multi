@@ -16,7 +16,8 @@ const store = {
   understood: 0,
   notUnderstood: 0,
   comments: [],
-  history: [] // 投票ごとの履歴
+  history: [], // 投票ごとの履歴
+  theme: ""
 };
 
 // 管理者が設定する想定投票人数（0〜100）
@@ -107,12 +108,28 @@ app.post("/api/admin/max-participants", (req, res) => {
   res.json({ success: true, maxParticipants: num });
 });
 
-// ★ 管理者用：全投票・コメント・履歴をリセットするAPI
+// 管理者用：全投票・コメント・履歴をリセットするAPI（セッションリセット用）
 app.post("/api/admin/reset", (req, res) => {
   store.understood = 0;
   store.notUnderstood = 0;
   store.comments = [];
   store.history = [];
+
+  res.json({ success: true });
+});
+
+// ★ 管理者用：全投票データを完全リセットするAPI
+//  → サーバー側の票・コメント・履歴を全部ゼロに
+//  → テーマや想定人数は今回は残す（必要ならここで消せる）
+app.post("/api/admin/reset-all", (req, res) => {
+  store.understood = 0;
+  store.notUnderstood = 0;
+  store.comments = [];
+  store.history = [];
+
+  // 完全にまっさらにしたければ、下もコメントアウト解除
+  // store.theme = "";
+  // adminSettings.maxParticipants = 0;
 
   res.json({ success: true });
 });
@@ -134,13 +151,11 @@ app.get("/api/results", (req, res) => {
     comments,
     history,
     maxParticipants: adminSettings.maxParticipants,
-    // ★ ここがポイント：テーマも一緒に返す
     theme: store.theme
   });
 });
 
-
-// ★ 管理者用：アンケートテーマの設定API
+// 管理者用：アンケートテーマの設定API
 app.post("/api/admin/theme", (req, res) => {
   const { theme } = req.body || {};
 
@@ -154,13 +169,10 @@ app.post("/api/admin/theme", (req, res) => {
   res.json({ success: true, theme: store.theme });
 });
 
-// ---------- API：投票者・管理者共通でテーマ取得 ----------
-
-// ★ テーマ取得API（投票者側・管理者側どちらからでも利用）
+// テーマ取得API（投票者側・管理者側どちらからでも利用）
 app.get("/api/theme", (req, res) => {
   res.json({ theme: store.theme });
 });
-
 
 // サーバー起動
 app.listen(PORT, () => {

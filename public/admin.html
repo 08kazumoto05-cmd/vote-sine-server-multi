@@ -1,9 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <!-- admin.html の <head> の中 -->
-<link rel="stylesheet" href="admin.css">
-
   <meta charset="UTF-8" />
   <title>理解度アンケート 管理画面</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -85,15 +82,26 @@
           </div>
         </div>
 
-        <!-- リセット -->
+        <!-- セッション単位のリセット -->
         <div class="card danger">
           <h2 class="card-title">投票データのリセット</h2>
           <p class="card-caption">
-            全ての票・コメント・履歴をリセットします。<br />
-            前回までのグラフは下部に保存されます。
+            現在の票・コメント・履歴をリセットします。<br />
+            グラフは「過去セッションの理解度推移」に保存されます。
           </p>
           <button id="btn-reset" class="btn danger wide">
             投票データをリセット
+          </button>
+        </div>
+
+        <!-- ★ 全投票データ完全リセット -->
+        <div class="card danger">
+          <h2 class="card-title">全投票データを完全リセット</h2>
+          <p class="card-caption">
+            現在セッションのグラフ・過去3セッションのグラフ・リセット回数をすべて削除します。
+          </p>
+          <button id="btn-reset-all" class="btn danger ghost">
+            全投票データを完全リセット
           </button>
         </div>
       </section>
@@ -126,23 +134,48 @@
         <!-- グラフエリア -->
         <div class="card large">
           <div class="card-header-row">
-            <h2 class="card-title">理解度％の推移（現在セッション）</h2>
+            <h2 class="card-title">理解度(理解 − 不理解) の推移</h2>
             <span class="card-caption">
-              直近は秒単位、その後は5秒・10秒単位にまとめて表示されます。
+              想定人数が0のときは投票人数を分母として計算されます。
             </span>
           </div>
           <canvas id="sineCanvas" width="900" height="260"></canvas>
         </div>
 
-        <!-- 前回セッションのグラフ -->
+        <!-- ★ 過去3セッションのグラフ -->
         <div class="card">
           <div class="card-header-row">
-            <h2 class="card-title">前回リセットまでの理解度推移</h2>
-            <span id="prevChart-note" class="card-caption">
-              まだ前回分のグラフはありません。
+            <h2 class="card-title">過去セッションの理解度推移</h2>
+            <span class="card-caption">
+              最近3回分までのセッションが保存されます。
             </span>
           </div>
-          <canvas id="prevChart" width="900" height="140"></canvas>
+
+          <div class="prev-session-wrap">
+            <!-- 直近のひとつ前 -->
+            <div class="prev-session-block">
+              <p id="prevChart-note1" class="card-caption">
+                1つ前のセッション：まだグラフはありません。
+              </p>
+              <canvas id="prevChart1" width="900" height="120"></canvas>
+            </div>
+
+            <!-- 2つ前 -->
+            <div class="prev-session-block">
+              <p id="prevChart-note2" class="card-caption">
+                2つ前のセッション：まだグラフはありません。
+              </p>
+              <canvas id="prevChart2" width="900" height="120"></canvas>
+            </div>
+
+            <!-- 3つ前 -->
+            <div class="prev-session-block">
+              <p id="prevChart-note3" class="card-caption">
+                3つ前のセッション：まだグラフはありません。
+              </p>
+              <canvas id="prevChart3" width="900" height="120"></canvas>
+            </div>
+          </div>
         </div>
 
         <!-- コメント一覧 -->
