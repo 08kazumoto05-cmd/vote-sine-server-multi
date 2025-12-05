@@ -1,9 +1,10 @@
 // admin.js - 管理画面
 // ・線は1本のみ（青）
 // ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100（マイナスは0）
-// ・投票が0のときは前回値を維持
+// ・投票が0のときは「前回の値（baselineRate）」を維持
 // ・「投票データをリセット」するたびに、その時点の最新値から次のセッションがスタート
-// ・過去セッションは最大3つまで保存して下の3つのグラフに表示
+// ・過去セッションは最大3つまで保存して、
+//    セッション1: 青 / セッション2: 赤 / セッション3: 緑 で表示
 // ・「全投票データを完全リセット」で全ての履歴削除
 
 const ADMIN_PASSWORD = "admin123";
@@ -50,16 +51,24 @@ const prevNotes = [
 ];
 const prevCtxs = prevCanvases.map(c => (c ? c.getContext("2d") : null));
 
+// セッションごとの色（セッション1=青, 2=赤, 3=緑）
+const SESSION_COLORS = ["#4fc3f7", "#e57373", "#81c784"];
+
 // ========== 状態 ==========
 
 // 現在セッションの履歴（{ts, rate}）
 let history = [];
 
 // 過去セッション（最大3つ分）。それぞれ [ {ts, rate}, ... ]
-let prevSessions = [[], [], []];
+// セッション1, セッション2, セッション3 の順に格納
+let prevSessions = [];
 
 // アニメーションフラグ
 let animationStarted = false;
+
+// ★ 前回セッションの最後の値（次セッションのスタート用）
+//   初期状態は0%。投票が入るたびに更新される
+let baselineRate = 0;
 
 // ========== 結果取得 ==========
 
@@ -82,25 +91,24 @@ async function fetchResults() {
     numTotal.textContent = total;
 
     // 表示用の「理解率」: ふつうの understood / (u + n)
-    const rateDisplay =
-      total > 0 ? Math.round((u / total) * 100) : 0;
+    const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
     rateUnderstood.textContent = rateDisplay + "%";
 
     // ---------- グラフ用1本線の値 ----------
     let rate = null;
 
     if (maxP > 0) {
-      if (total === 0 && history.length > 0) {
-        // 投票が0でも、履歴があるときは最新値を維持
-        rate = history[history.length - 1].rate;
-      } else if (total === 0 && history.length === 0) {
-        // 完全に何も無いとき
-        rate = null; // 何も描かない
+      if (total === 0) {
+        // ★ 投票が0件のあいだは、前回の値（baselineRate）をそのまま表示
+        rate = baselineRate;
       } else {
         // (理解 − 不理解) ÷ 想定人数 ×100
         rate = Math.round(((u - n) / maxP) * 100);
         if (rate < 0) rate = 0;
         if (rate > 100) rate = 100;
+
+        // ★ 投票が入ったら、その値を「次セッションのスタート値」として記録
+        baselineRate = rate;
       }
     } else {
       // 想定人数が0 → グラフは非表示
@@ -197,7 +205,10 @@ function drawLineChart() {
   }
 
   // 余白
-  const L = 50, R = 10, T = 20, B = 48;
+  const L = 50,
+    R = 10,
+    T = 20,
+    B = 48;
   const plotW = w - L - R;
   const plotH = h - T - B;
 
@@ -230,7 +241,7 @@ function drawLineChart() {
   // X座標
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
 
-  // 青線1本
+  // 青線1本（現在セッション）
   ctx.strokeStyle = "#4fc3f7";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -297,7 +308,7 @@ function drawLineChart() {
 
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
-    const hist = prevSessions[i];
+    const hist = prevSessions[i] || [];
     const c = prevCanvases[i];
     const note = prevNotes[i];
     const pctx = prevCtxs[i];
@@ -311,16 +322,19 @@ function drawPrevSessions() {
 
     if (!hist || hist.length === 0) {
       if (note) {
-        note.textContent = `${i + 1}つ前のセッション：まだグラフはありません。`;
+        note.textContent = `セッション${i + 1}：まだグラフはありません。`;
       }
       continue;
     }
 
     if (note) {
-      note.textContent = `${i + 1}つ前のセッション：理解度(理解 − 不理解) の推移`;
+      note.textContent = `セッション${i + 1}：理解度(理解 − 不理解) の推移`;
     }
 
-    const L = 40, R = 10, T = 15, B = 25;
+    const L = 40,
+      R = 10,
+      T = 15,
+      B = 25;
     const plotW = w - L - R;
     const plotH = h - T - B;
 
@@ -351,7 +365,9 @@ function drawPrevSessions() {
 
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
 
-    pctx.strokeStyle = "#90caf9";
+    // ★ セッションごとの色を適用
+    const color = SESSION_COLORS[i] || "#90caf9";
+    pctx.strokeStyle = color;
     pctx.lineWidth = 2;
     pctx.beginPath();
     hist.forEach((p, idx) => {
@@ -495,13 +511,23 @@ if (btnReset) {
     try {
       // 現在セッションの最後の値を取得
       const last = history[history.length - 1];
-      const lastRate = last ? last.rate : 0;
 
-      // 現在セッションを過去セッションに保存（先頭に追加）
+      // 「最後の値」があればそれを、なければ現在の baselineRate を使う
+      let lastRate = 0;
+      if (last && typeof last.rate === "number") {
+        lastRate = last.rate;
+      } else if (typeof baselineRate === "number") {
+        lastRate = baselineRate;
+      }
+
+      // 現在セッションを過去セッションに保存（末尾に追加）
       if (history.length > 0) {
         const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
-        prevSessions.unshift(copy);
-        if (prevSessions.length > 3) prevSessions = prevSessions.slice(0, 3);
+        prevSessions.push(copy);
+        if (prevSessions.length > 3) {
+          // 古いものから消す（常に最大3セッション）
+          prevSessions = prevSessions.slice(-3);
+        }
         drawPrevSessions();
       }
 
@@ -509,10 +535,14 @@ if (btnReset) {
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // 新しいセッションのスタート：前回の最新値からスタート
+      // ★ 次セッション用の基準値を更新
+      baselineRate = lastRate;
+
+      // 新しいセッションのスタート：前回の最新値から1点だけ入れておく
       history = [];
-      if (last) {
-        history.push({ ts: Date.now(), rate: lastRate });
+      const maxPNow = Number(maxInput.value || "0");
+      if (maxPNow > 0) {
+        history.push({ ts: Date.now(), rate: baselineRate });
       }
 
       await fetchResults();
@@ -534,12 +564,14 @@ if (btnResetAll) {
     if (!ok) return;
 
     try {
-      const res = await fetch("/api/admin/reset-all", { method: "POST" });
+      // ★ サーバー側：通常のリセットAPIを使う（全票・コメント・履歴を削除）
+      const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset all");
 
-      // 全履歴クリア
+      // 全履歴クリア（クライアント側）
       history = [];
-      prevSessions = [[], [], []];
+      prevSessions = [];
+      baselineRate = 0;
       drawPrevSessions();
 
       await fetchResults();
