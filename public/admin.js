@@ -1,10 +1,9 @@
 // admin.js - 管理画面
 // ・票数表示
-// ・理解度バランス％表示（青線）
-// ・投票率％表示（緑線）
+// ・理解度％表示（青線：理解できた％のみ）
 // ・コメント一覧
 // ・テーマ設定
-// ・想定投票人数
+// ・想定投票人数（分母に反映）
 // ・投票リセット＋前回グラフ保存＋前回の最終値から継続
 
 // 簡易パスワード
@@ -45,10 +44,10 @@ const prevNote = document.getElementById("prevChart-note");
 // ========= 折れ線グラフ用の状態 =========
 
 // 現在セッションの履歴データ
-// 例: { ts: 173…, score: 60, voteRate: 40 }
+// 例: { ts: 173…, rate: 60 }
 let history = [];
 
-// 前回リセットまでの履歴（理解度バランスのみ）
+// 前回リセットまでの履歴（理解できた％）
 let prevHistory = [];
 
 // アニメーション開始済みフラグ
@@ -74,51 +73,25 @@ async function fetchResults() {
     numNotUnderstood.textContent = n;
     numTotal.textContent = total;
 
-    // ===== 表示用の「理解率％」（サマリーカード） =====
-    // → ここは従来どおり「理解できた ÷ (理解＋わからない)」
-    let rateDisplay;
-    if (total > 0) {
-      rateDisplay = Math.round((u / total) * 100);
-    } else {
-      rateDisplay = 0;
-    }
-    rateUnderstood.textContent = rateDisplay + "%";
-
-    // ===== 緑線：投票率％（0〜100） =====
-    // 想定人数が設定されている場合 → (理解+不理解) / 想定人数
-    // 想定人数が0で投票がある場合 → 全員投票済みとみなし 100%
-    let voteRate;
+    // ===== 理解できた％（グラフ＆表示用） =====
+    // 想定人数が設定されているとき：
+    //   rate = understood / maxP * 100
+    // 想定人数が0：
+    //   rate = understood / (understood + notUnderstood) * 100
+    // 投票が0のとき：
+    //   0% スタート（履歴があれば前回値を維持してもいいが、今回は 0 にする）
+    let rate;
     if (maxP > 0) {
-      voteRate = Math.round(((u + n) / maxP) * 100);
-      voteRate = Math.min(100, Math.max(0, voteRate));
+      rate = Math.round((u / maxP) * 100);
+      rate = Math.min(100, Math.max(0, rate));
     } else if (total > 0) {
-      voteRate = 100;
-    } else if (history.length > 0) {
-      voteRate = history[history.length - 1].voteRate;
+      rate = Math.round((u / total) * 100);
     } else {
-      voteRate = 0;
+      rate = 0;
     }
 
-    // ===== 青線：理解度バランス％（0〜100） =====
-    // 50% を「中立」とし、
-    // ・全員「理解できた」 → 100%
-    // ・全員「あまり理解できなかった」 → 0%
-    // ・半々 → 50%
-    // 想定人数があれば分母は maxP、なければ total
-    let score;
-    if (maxP > 0) {
-      const diff = u - n; // 理解 − 不理解
-      score = Math.round(50 + (diff / maxP) * 50);
-      score = Math.min(100, Math.max(0, score));
-    } else if (total > 0) {
-      const diff = u - n;
-      score = Math.round(50 + (diff / total) * 50);
-      score = Math.min(100, Math.max(0, score));
-    } else if (history.length > 0) {
-      score = history[history.length - 1].score;
-    } else {
-      score = 50; // 投票なしのときは中立
-    }
+    // サマリーカードにも同じ値を表示
+    rateUnderstood.textContent = rate + "%";
 
     // 想定投票人数（管理者が入力中のときは上書きしない）
     if (maxInput && document.activeElement !== maxInput) {
@@ -126,7 +99,7 @@ async function fetchResults() {
     }
     if (maxInfo) {
       if (maxP > 0) {
-        maxInfo.textContent = `想定人数：${maxP}人中、${total}人が投票済み（投票率：${voteRate}%）`;
+        maxInfo.textContent = `想定人数：${maxP}人中、${total}人が投票済み`;
       } else {
         maxInfo.textContent = "想定人数は未設定です（0人）";
       }
@@ -146,7 +119,7 @@ async function fetchResults() {
     renderComments(data.comments || []);
 
     // グラフ用の履歴に追加
-    addPoint(score, voteRate);
+    addRatePoint(rate);
     if (!animationStarted) {
       animationStarted = true;
       requestAnimationFrame(drawLineChart);
@@ -162,13 +135,13 @@ async function fetchResults() {
 // ========= 折れ線グラフ用の関数 =========
 
 // 履歴に1点追加（同じ値が続くときは追加しない）
-function addPoint(score, voteRate) {
+function addRatePoint(rate) {
   const now = Date.now();
   const last = history[history.length - 1];
 
-  if (last && last.score === score && last.voteRate === voteRate) return;
+  if (last && last.rate === rate) return;
 
-  history.push({ ts: now, score, voteRate });
+  history.push({ ts: now, rate });
 
   // 直近200点だけ残す
   if (history.length > 200) {
@@ -229,31 +202,19 @@ function drawLineChart() {
   const n = history.length;
   const stepX = n > 1 ? plotWidth / (n - 1) : 0;
 
-  // ===== 青線：理解度バランス（0〜100、50が中立） =====
-  ctx.strokeStyle = "#1976d2";
+  // ===== 折れ線（理解できた％：青） =====
+  ctx.strokeStyle = "#1976d2"; // 青
   ctx.lineWidth = 2;
   ctx.beginPath();
   history.forEach((p, i) => {
     const x = paddingLeft + stepX * i;
-    const y = h - paddingBottom - (p.score / 100) * plotHeight;
+    const y = h - paddingBottom - (p.rate / 100) * plotHeight;
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
 
-  // ===== 緑線：投票率（0〜100） =====
-  ctx.strokeStyle = "#4caf50";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  history.forEach((p, i) => {
-    const x = paddingLeft + stepX * i;
-    const y = h - paddingBottom - (p.voteRate / 100) * plotHeight;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // 時間ラベル（直近5秒は秒単位、その後は5秒／10秒単位）
+  // 時間ラベル
   ctx.fillStyle = "#555";
   ctx.font = "10px sans-serif";
   ctx.textAlign = "center";
@@ -272,11 +233,9 @@ function drawLineChart() {
     let labelKey = "";
 
     if (age <= 5000) {
-      // 直近5秒 → 秒単位
       label = d.toLocaleTimeString("ja-JP", { hour12: false });
       labelKey = "sec-" + label;
     } else if (age <= 10000) {
-      // 5〜10秒 → 5秒刻み
       const sec = Math.floor(d.getSeconds() / 5) * 5;
       label =
         `${d.getHours().toString().padStart(2, "0")}:` +
@@ -284,7 +243,6 @@ function drawLineChart() {
         `${sec.toString().padStart(2, "0")}`;
       labelKey = "5sec-" + label;
     } else {
-      // 10秒以上 → 10秒刻み
       const sec = Math.floor(d.getSeconds() / 10) * 10;
       label =
         `${d.getHours().toString().padStart(2, "0")}:` +
@@ -305,7 +263,7 @@ function drawLineChart() {
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
   ctx.fillText(
-    "理解度バランス（青：50%が中立）と投票率（緑）の推移",
+    "理解できた割合の推移（想定投票人数を分母に反映）",
     paddingLeft + plotWidth / 2,
     paddingTop - 5
   );
@@ -330,8 +288,7 @@ function drawPrevChart() {
   }
 
   if (prevNote) {
-    prevNote.textContent =
-      "前回リセットまでの理解度バランス（青線：0〜100%、50%が中立）";
+    prevNote.textContent = "前回リセットまでの理解度推移（理解できた％）";
   }
 
   const paddingLeft = 40;
@@ -369,13 +326,13 @@ function drawPrevChart() {
   const n = prevHistory.length;
   const stepX = n > 1 ? plotWidth / (n - 1) : 0;
 
-  // 折れ線（前回分の理解度バランス）
+  // 折れ線（前回分：理解できた％）
   prevCtx.strokeStyle = "#90caf9";
   prevCtx.lineWidth = 2;
   prevCtx.beginPath();
   prevHistory.forEach((p, i) => {
     const x = paddingLeft + stepX * i;
-    const y = h - paddingBottom - (p.score / 100) * plotHeight;
+    const y = h - paddingBottom - (p.rate / 100) * plotHeight;
     if (i === 0) prevCtx.moveTo(x, y);
     else prevCtx.lineTo(x, y);
   });
@@ -519,17 +476,16 @@ if (btnReset) {
     if (!ok) return;
 
     try {
-      // ★ リセット前の履歴を退避して小さいグラフに表示（理解度バランスだけ）
+      // ★ リセット前の履歴を退避して小さいグラフに表示（理解できた％）
       prevHistory = history.map((p) => ({
         ts: p.ts,
-        score: p.score
+        rate: p.rate
       }));
       drawPrevChart();
 
-      // ★ 最終値を保持（なければデフォルト）
+      // ★ 最終理解度％を保持（なければ0）
       const last = history[history.length - 1];
-      const lastScore = last ? last.score : 50;
-      const lastVoteRate = last ? last.voteRate : 0;
+      const lastRate = last ? last.rate : 0;
 
       // サーバー側リセット
       const res = await fetch("/api/admin/reset", {
@@ -540,13 +496,11 @@ if (btnReset) {
         throw new Error("failed to reset");
       }
 
-      // ★ 現在セッションの履歴は一旦クリアし、
-      //   「前回の最終値」から新しい時間軸でスタート
+      // ★ 現在セッションの履歴はクリアして、前回の最終値から再スタート
       history = [];
       history.push({
         ts: Date.now(),
-        score: lastScore,
-        voteRate: lastVoteRate
+        rate: lastRate
       });
 
       await fetchResults();
@@ -590,4 +544,3 @@ pwInput.addEventListener("keydown", (e) => {
     btnUnlock.click();
   }
 });
-
