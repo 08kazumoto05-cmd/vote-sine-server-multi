@@ -1,12 +1,13 @@
 // admin.js - 管理画面
 // ・現在セッションの線：青 1本のみ
-// ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100（マイナスは0）
-// ・投票が0のときは「前回の値（baselineRate）」を維持
-// ・「投票データをリセット」するたびに、
-//    そのセッションのグラフをセッション1→2→3として保存
-//    セッション1: 青, セッション2: 赤, セッション3: 緑
-// ・新しいセッションは「前の最新値」からスタート
-// ・「全投票データを完全リセット」で全ての履歴削除（/api/admin/reset のみ使用）
+// ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
+// ・Y軸は -100% 〜 +100% で、中央の0%が基準線（無回答/差ゼロ）
+// ・理解できたが多いほど +方向、理解できなかったが多いほど -方向に伸びる
+// ・投票が0のときは baselineRate を維持
+// ・「投票データをリセット」でそのセッションを保存し、新しいセッションは
+//    直前の最新値（baselineRate）からスタート
+// ・過去セッション最大3つ保存：セッション1=青, 2=赤, 3=緑
+// ・「全投票データを完全リセット」で全履歴削除（/api/admin/reset のみ利用）
 
 const ADMIN_PASSWORD = "admin123";
 
@@ -52,7 +53,7 @@ const prevNotes = [
 ];
 const prevCtxs = prevCanvases.map(c => (c ? c.getContext("2d") : null));
 
-// セッション1,2,3 の色
+// セッション1,2,3 の線色
 const SESSION_COLORS = [
   "#4fc3f7", // セッション1: 青
   "#e57373", // セッション2: 赤
@@ -61,19 +62,19 @@ const SESSION_COLORS = [
 
 // ===== 状態 =====
 
-// 現在セッションの履歴（{ts, rate}）
+// 現在セッションの履歴 [{ts, rate}]
 let history = [];
 
-// 過去セッション（最大3つ分）
-// prevSessions[0] = セッション1（最初にリセットしたときのグラフ = 青）
-// prevSessions[1] = セッション2（1回目リセット後のグラフ = 赤）
-// prevSessions[2] = セッション3（2回目リセット後のグラフ = 緑）
+// 過去セッション（最大3つ）
+// prevSessions[0] = セッション1 (青)
+// prevSessions[1] = セッション2 (赤)
+// prevSessions[2] = セッション3 (緑)
 let prevSessions = [];
 
-// アニメーションフラグ
+// 描画アニメーションフラグ
 let animationStarted = false;
 
-// 次セッションのスタート値（投票があるたびに更新）
+// 次セッションのスタート値（投票が入るたび更新）
 let baselineRate = 0;
 
 // ===== 結果取得 =====
@@ -96,28 +97,29 @@ async function fetchResults() {
     numNotUnderstood.textContent = n;
     numTotal.textContent = total;
 
-    // 表示用「理解率」 = understood / total
+    // 表示用「理解率」 = understood / total (0〜100%)
     const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
     rateUnderstood.textContent = rateDisplay + "%";
 
-    // ----- グラフ用1本線の値 -----
+    // ----- グラフ用値（-100〜+100） -----
     let rate = null;
 
     if (maxP > 0) {
       if (total === 0) {
-        // 投票が0件のあいだは baselineRate をそのまま使用
+        // 投票が0件のあいだは baselineRate をそのまま表示
         rate = baselineRate;
       } else {
-        // (理解 − 不理解) ÷ 想定人数 × 100
-        rate = Math.round(((u - n) / maxP) * 100);
-        if (rate < 0) rate = 0;
-        if (rate > 100) rate = 100;
+        // (理解 − 不理解) ÷ 想定人数 ×100 → -100〜+100 にクリップ
+        let raw = ((u - n) / maxP) * 100;
+        if (raw > 100) raw = 100;
+        if (raw < -100) raw = -100;
+        rate = Math.round(raw);
 
-        // 投票があるたび baselineRate を更新
+        // 投票があれば baselineRate 更新
         baselineRate = rate;
       }
     } else {
-      // 想定人数 0 → グラフ非表示
+      // 想定人数が0 → グラフ非表示
       rate = null;
     }
 
@@ -162,7 +164,7 @@ async function fetchResults() {
 function addRatePoint(rate) {
   const now = Date.now();
 
-  if (rate === null) return; // 想定人数0 など
+  if (rate === null) return; // 想定人数0のときなど
 
   const last = history[history.length - 1];
   if (last && last.rate === rate) return;
@@ -171,6 +173,15 @@ function addRatePoint(rate) {
   if (history.length > 200) {
     history = history.slice(-200);
   }
+}
+
+// ===== Y座標変換（-100〜+100 → キャンバスY） =====
+
+function valueToY(v, h, B, plotH) {
+  // v: -100〜+100
+  // -100 → 一番下, +100 → 一番上, 0 → ちょうど真ん中
+  const ratio = (v + 100) / 200; // -100 → 0, 0 → 0.5, +100 → 1
+  return h - B - ratio * plotH;
 }
 
 // ===== 現在セッションのグラフ描画（青1本） =====
@@ -219,21 +230,33 @@ function drawLineChart() {
   ctx.lineTo(w - R, h - B);
   ctx.stroke();
 
-  // Y軸
-  ctx.fillStyle = "#888";
+  // Y軸目盛（-100, -50, 0, 50, 100）
   ctx.font = "10px sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
 
-  [0, 25, 50, 75, 100].forEach(v => {
-    const y = h - B - (v / 100) * plotH;
-    ctx.fillText(v + "%", L - 6, y + 2);
+  const yTicks = [-100, -50, 0, 50, 100];
+  yTicks.forEach(v => {
+    const y = valueToY(v, h, B, plotH);
 
-    ctx.strokeStyle = "#222";
+    // 0% の線は少し太め＆明るめ
+    if (v === 0) {
+      ctx.strokeStyle = "#888";
+      ctx.lineWidth = 1.5;
+    } else {
+      ctx.strokeStyle = "#222";
+      ctx.lineWidth = 1;
+    }
+
+    // グリッド線
     ctx.beginPath();
     ctx.moveTo(L, y);
     ctx.lineTo(w - R, y);
     ctx.stroke();
+
+    // ラベル
+    ctx.fillStyle = "#ccc";
+    ctx.fillText(v + "%", L - 6, y + 2);
   });
 
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
@@ -244,7 +267,7 @@ function drawLineChart() {
   ctx.beginPath();
   history.forEach((p, i) => {
     const x = L + i * stepX;
-    const y = h - B - (p.rate / 100) * plotH;
+    const y = valueToY(p.rate, h, B, plotH);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -293,7 +316,7 @@ function drawLineChart() {
   ctx.textAlign = "center";
   ctx.textBaseline = "bottom";
   ctx.fillText(
-    "理解度(理解 − 不理解) の推移（想定人数を分母、マイナスは0として表示）",
+    "理解度のバランス（+側：理解できた が多い / −側：理解できなかった が多い）",
     L + plotW / 2,
     T - 4
   );
@@ -302,9 +325,6 @@ function drawLineChart() {
 }
 
 // ===== 過去セッションのグラフ描画 =====
-// prevSessions[0] → セッション1（青）
-// prevSessions[1] → セッション2（赤）
-// prevSessions[2] → セッション3（緑）
 
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
@@ -328,7 +348,7 @@ function drawPrevSessions() {
     }
 
     if (note) {
-      note.textContent = `セッション${i + 1}：理解度(理解 − 不理解) の推移`;
+      note.textContent = `セッション${i + 1}：理解度バランスの推移`;
     }
 
     const L = 40, R = 10, T = 15, B = 25;
@@ -344,20 +364,30 @@ function drawPrevSessions() {
     pctx.lineTo(w - R, h - B);
     pctx.stroke();
 
-    // Y軸
-    pctx.fillStyle = "#aaa";
+    // Y軸（-100, -50, 0, 50, 100）
     pctx.font = "9px sans-serif";
     pctx.textAlign = "right";
     pctx.textBaseline = "middle";
 
-    [0, 25, 50, 75, 100].forEach(v => {
-      const y = h - B - (v / 100) * plotH;
-      pctx.fillText(v + "%", L - 4, y + 2);
-      pctx.strokeStyle = "#222";
+    const yTicks = [-100, -50, 0, 50, 100];
+    yTicks.forEach(v => {
+      const y = valueToY(v, h, B, plotH);
+
+      if (v === 0) {
+        pctx.strokeStyle = "#888";
+        pctx.lineWidth = 1.5;
+      } else {
+        pctx.strokeStyle = "#222";
+        pctx.lineWidth = 1;
+      }
+
       pctx.beginPath();
       pctx.moveTo(L, y);
       pctx.lineTo(w - R, y);
       pctx.stroke();
+
+      pctx.fillStyle = "#ccc";
+      pctx.fillText(v + "%", L - 4, y + 2);
     });
 
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
@@ -369,7 +399,7 @@ function drawPrevSessions() {
     pctx.beginPath();
     hist.forEach((p, idx) => {
       const x = L + idx * stepX;
-      const y = h - B - (p.rate / 100) * plotH;
+      const y = valueToY(p.rate, h, B, plotH);
       if (idx === 0) pctx.moveTo(x, y);
       else pctx.lineTo(x, y);
     });
@@ -516,25 +546,24 @@ if (btnReset) {
         lastRate = baselineRate;
       }
 
-      // 現在セッションを保存（最大3つ、セッション1→2→3）
+      // 現在セッションを保存（末尾に追加、最大3つ）
       if (history.length > 0) {
         const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
         prevSessions.push(copy);
         if (prevSessions.length > 3) {
-          // 4回目以降は古いものから消す
           prevSessions = prevSessions.slice(prevSessions.length - 3);
         }
         drawPrevSessions();
       }
 
-      // サーバー側リセット
+      // サーバー側リセット（票・コメントの実データ）
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // 次セッションの基準値更新
+      // 次セッションの基準値
       baselineRate = lastRate;
 
-      // 新セッション開始：前回の最新値から1点だけ入れる
+      // 新セッション開始：前回の最新値を1点だけ入れておく
       history = [];
       const maxPNow = Number(maxInput.value || "0");
       if (maxPNow > 0) {
@@ -551,7 +580,6 @@ if (btnReset) {
 }
 
 // ===== 全投票データ完全リセット =====
-// サーバー側もクライアント側も「全部ゼロ」にする
 
 if (btnResetAll) {
   btnResetAll.addEventListener("click", async () => {
@@ -561,11 +589,11 @@ if (btnResetAll) {
     if (!ok) return;
 
     try {
-      // サーバー側は /api/admin/reset を流用（全票・コメント・履歴クリア）
+      // サーバー側も通常の reset API を利用
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset all");
 
-      // クライアント側も完全クリア
+      // クライアント側の履歴を完全クリア
       history = [];
       prevSessions = [];
       baselineRate = 0;
