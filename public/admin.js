@@ -1,20 +1,20 @@
 // admin.js - 管理画面
-// ● グラフは真ん中が 0 のプラス/マイナス表示
-//   ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
-//   ・想定人数が 0 のときは、(理解 − 不理解) ÷ 投票人数 ×100
-// ● セッションごとに線の色を変える
+// 中央 0 の + / - グラフ（スロットの差枚グラフ風）
+// 値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
+// 想定人数 0 のときは (理解 − 不理解) ÷ 投票人数 ×100
+// セッションごとに線の色を変える
 //   0回目(初回) : 青
 //   1回目リセット後 : 赤
 //   2回目リセット後 : 緑
-// ● 「投票データをリセット」
-//   その時点までの線を過去セッションに保存し、
-//   その時の最新値から次のセッションをスタート（線がつながるイメージ）
-// ● 「全投票データを完全リセット」
-//   現在セッション＋過去3セッションの履歴を全部削除
+// 「投票データをリセット」:
+//   その時点までの線を過去セッションに保存し，
+//   最新値から次のセッションをスタート
+// 「全投票データを完全リセット」:
+//   現在セッション＋過去セッションの履歴を全部削除
 
 const ADMIN_PASSWORD = "admin123";
 
-// ==== DOM取得 ====
+// ===== DOM =====
 const lockScreen = document.getElementById("lock-screen");
 const adminContent = document.getElementById("admin-content");
 const pwInput = document.getElementById("admin-password");
@@ -43,7 +43,7 @@ const themeInput = document.getElementById("theme-input");
 const btnSaveTheme = document.getElementById("btn-save-theme");
 const themeInfo = document.getElementById("theme-info");
 
-// 過去3セッション用キャンバス
+// 過去セッション用キャンバス
 const prevCanvases = [
   document.getElementById("prevChart1"),
   document.getElementById("prevChart2"),
@@ -56,42 +56,42 @@ const prevNotes = [
 ];
 const prevCtxs = prevCanvases.map((c) => (c ? c.getContext("2d") : null));
 
-// ==== 状態 ====
+// ===== 状態 =====
 
 // 現在セッションの履歴 [{ ts, rate }]
 let history = [];
 
 // 過去セッション（最大3つ）
 // [{ color: "#xxxxxx", points: [{ts, rate}, ...] }, ...]
+// prevSessions[0] が 1つ前、[1] が 2つ前、[2] が3つ前
 let prevSessions = [];
 
-// リセット回数（0:初回, 1:1回目リセット後, 2:2回目リセット後…）
+// リセット回数（0: 初回セッション, 1:2本目(赤), 2:3本目(緑)…）
 let resetCount = 0;
 
 // セッションごとの色
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a"];
 
-// 描画ループ開始済みか
+// 描画ループ開始フラグ
 let animationStarted = false;
 
-// ==== ユーティリティ ====
+// ===== ユーティリティ =====
 
-// 現在セッションの色を取得
+// 現在セッションの色
 function getCurrentColor() {
   const idx = Math.min(resetCount, SESSION_COLORS.length - 1);
   return SESSION_COLORS[idx];
 }
 
-// -100〜100 の値をキャンバスY座標に変換
+// -100〜100 の値をキャンバスY座標に変換（中央が0）
 function valueToY(value, canvasHeight, bottomPadding, plotHeight) {
-  // クリップ
   let v = Math.max(-100, Math.min(100, value));
   // -100 → 下端, 0 → 中央, 100 → 上端
   const ratio = (v + 100) / 200; // 0〜1
   return canvasHeight - bottomPadding - ratio * plotHeight;
 }
 
-// ==== 結果取得 ====
+// ===== 結果取得 =====
 
 async function fetchResults() {
   try {
@@ -106,21 +106,21 @@ async function fetchResults() {
     const maxP = data.maxParticipants ?? 0;
     const theme = data.theme || "";
 
-    // 票数表示
+    // 票数
     numUnderstood.textContent = u;
     numNotUnderstood.textContent = n;
     numTotal.textContent = total;
 
-    // 表示用理解率（普通の％）
+    // 普通の理解率表示
     const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
     rateUnderstood.textContent = rateDisplay + "%";
 
-    // --- グラフ用の値（-100〜100） ---
+    // ---- グラフ用の値（-100〜100） ----
     let rate = null;
 
     if (maxP > 0) {
       if (total === 0 && history.length > 0) {
-        // 投票が0でも履歴があるときは前回値を維持
+        // 投票0でも履歴があるなら前回値を維持
         rate = history[history.length - 1].rate;
       } else if (total === 0 && history.length === 0) {
         rate = null; // 何も描かない
@@ -128,7 +128,7 @@ async function fetchResults() {
         rate = ((u - n) / maxP) * 100;
       }
     } else {
-      // 想定人数が0 → 代わりに投票人数を分母にする（お好みで変更OK）
+      // 想定人数0 → 投票人数を分母
       if (total > 0) {
         rate = ((u - n) / total) * 100;
       } else if (history.length > 0) {
@@ -139,11 +139,11 @@ async function fetchResults() {
     }
 
     if (rate !== null) {
-      // -100〜100 にクリップ
-      rate = Math.max(-100, Math.min(100, Math.round(rate)));
+      rate = Math.round(rate);
+      rate = Math.max(-100, Math.min(100, rate));
     }
 
-    // 想定人数UI
+    // 想定人数 UI
     if (document.activeElement !== maxInput) {
       maxInput.value = maxP;
     }
@@ -154,7 +154,7 @@ async function fetchResults() {
         "想定人数が未設定です（投票人数を分母にして計算します）";
     }
 
-    // テーマUI
+    // テーマ UI
     themeInfo.textContent = theme
       ? `現在のテーマ：${theme}`
       : "現在のテーマ：未設定";
@@ -165,10 +165,10 @@ async function fetchResults() {
     // コメント
     renderComments(data.comments || []);
 
-    // 履歴更新
+    // 履歴追加
     addRatePoint(rate);
 
-    // 描画スタート
+    // 描画開始
     if (!animationStarted) {
       animationStarted = true;
       requestAnimationFrame(drawLineChart);
@@ -180,14 +180,14 @@ async function fetchResults() {
   }
 }
 
-// ==== 履歴管理 ====
+// ===== 履歴管理 =====
 
 function addRatePoint(rate) {
   const now = Date.now();
   if (rate === null) return;
 
   const last = history[history.length - 1];
-  if (last && last.rate === rate) return; // 同じ値が続くときは追加しない
+  if (last && last.rate === rate) return; // 同じ値は追加しない
 
   history.push({ ts: now, rate });
 
@@ -196,13 +196,13 @@ function addRatePoint(rate) {
   }
 }
 
-// ==== 現在セッションのグラフ描画（スロット風） ====
+// ===== 現在セッションのグラフ描画（スロット風） =====
 
 function drawLineChart() {
   const w = canvas.width;
   const h = canvas.height;
 
-  // 背景を黒で塗る
+  // 背景黒
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
 
@@ -216,16 +216,14 @@ function drawLineChart() {
     return;
   }
 
-  const maxP = Number(maxInput.value || "0");
-
-  const L = 50,
-    R = 20,
-    T = 20,
-    B = 40;
+  const L = 50;
+  const R = 20;
+  const T = 20;
+  const B = 40;
   const plotW = w - L - R;
   const plotH = h - T - B;
 
-  // 外枠（白）
+  // 外枠
   ctx.strokeStyle = "#FFFFFF";
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
@@ -235,7 +233,7 @@ function drawLineChart() {
   ctx.lineTo(w - R, h - B);
   ctx.stroke();
 
-  // Y軸目盛（-100, -50, 0, 50, 100）
+  // Y目盛 (-100, -50, 0, 50, 100)
   const yTicks = [-100, -50, 0, 50, 100];
   ctx.font = "10px sans-serif";
   ctx.textAlign = "right";
@@ -245,7 +243,7 @@ function drawLineChart() {
     const y = valueToY(v, h, B, plotH);
 
     if (v === 0) {
-      // 0ラインは太めの実線
+      // 0ラインは実線
       ctx.strokeStyle = "#FFFFFF";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([]);
@@ -266,7 +264,7 @@ function drawLineChart() {
     ctx.fillText(v + "%", L - 6, y);
   });
 
-  // X方向補助線（1/4,1/2,3/4に白点線）
+  // X方向の縦の補助線
   ctx.strokeStyle = "#FFFFFF";
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
@@ -282,7 +280,7 @@ function drawLineChart() {
   // X座標
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
 
-  // 現在セッションの色（初回:青 / 1回目リセット後:赤 / 2回目以降:緑）
+  // 現在セッションの色
   const currentColor = getCurrentColor();
 
   // 折れ線
@@ -312,7 +310,7 @@ function drawLineChart() {
   requestAnimationFrame(drawLineChart);
 }
 
-// ==== 過去セッションのグラフ描画 ====
+// ===== 過去セッションのグラフ描画 =====
 
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
@@ -344,10 +342,10 @@ function drawPrevSessions() {
       note.textContent = `セッション${i + 1}：理解度バランスの推移`;
     }
 
-    const L = 40,
-      R = 15,
-      T = 15,
-      B = 25;
+    const L = 40;
+    const R = 15;
+    const T = 15;
+    const B = 25;
     const plotW = w - L - R;
     const plotH = h - T - B;
 
@@ -361,7 +359,7 @@ function drawPrevSessions() {
     pctx.lineTo(w - R, h - B);
     pctx.stroke();
 
-    // Y軸
+    // Y目盛
     const yTicks = [-100, -50, 0, 50, 100];
     pctx.font = "9px sans-serif";
     pctx.textAlign = "right";
@@ -390,7 +388,7 @@ function drawPrevSessions() {
       pctx.fillText(v + "%", L - 4, y);
     });
 
-    // X補助線
+    // X方向補助線
     pctx.strokeStyle = "#FFFFFF";
     pctx.lineWidth = 1;
     pctx.setLineDash([4, 4]);
@@ -405,7 +403,7 @@ function drawPrevSessions() {
 
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
 
-    // セッションごとの色で線を描画
+    // セッションごとの色
     pctx.strokeStyle = color || "#FFA726";
     pctx.lineWidth = 2;
     pctx.setLineDash([]);
@@ -420,7 +418,7 @@ function drawPrevSessions() {
   }
 }
 
-// ==== コメント表示 ====
+// ===== コメント表示 =====
 
 function renderComments(comments) {
   commentList.innerHTML = "";
@@ -471,7 +469,7 @@ function renderComments(comments) {
     });
 }
 
-// ==== 時刻表示 ====
+// ===== 時刻表示 =====
 
 function updateTimeLabel() {
   if (!timeIndicator) return;
@@ -480,7 +478,7 @@ function updateTimeLabel() {
   timeIndicator.textContent = `現在時刻：${text}`;
 }
 
-// ==== 想定人数保存 ====
+// ===== 想定人数保存 =====
 
 if (btnSaveMax && maxInput) {
   btnSaveMax.addEventListener("click", async () => {
@@ -507,14 +505,12 @@ if (btnSaveMax && maxInput) {
       alert("想定投票人数を保存しました。");
     } catch (e) {
       console.error(e);
-      alert(
-        "想定人数の保存に失敗しました。時間をおいて再度お試しください。"
-      );
+      alert("想定人数の保存に失敗しました。時間をおいて再度お試しください。");
     }
   });
 }
 
-// ==== テーマ保存 ====
+// ===== テーマ保存 =====
 
 if (btnSaveTheme && themeInput) {
   btnSaveTheme.addEventListener("click", async () => {
@@ -541,7 +537,7 @@ if (btnSaveTheme && themeInput) {
   });
 }
 
-// ==== 投票リセット（セッション単位） ====
+// ===== 投票リセット（セッション単位） =====
 
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
@@ -556,7 +552,7 @@ if (btnReset) {
       const lastRate = last ? last.rate : 0;
       const currentColor = getCurrentColor();
 
-      // 現在セッションを過去セッションに保存（先頭に追加）
+      // 現在セッションを過去セッションへ保存（先頭に追加）
       if (history.length > 0) {
         const copy = history.map((p) => ({ ts: p.ts, rate: p.rate }));
         prevSessions.unshift({ color: currentColor, points: copy });
@@ -564,14 +560,14 @@ if (btnReset) {
         drawPrevSessions();
       }
 
-      // サーバー側の投票リセット
+      // サーバー側の投票データリセット
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // リセット回数を増やす（次のセッションの色が変わる）
+      // リセット回数を増やす → 次セッションの線の色が変わる
       resetCount++;
 
-      // 新しいセッション：前回の最新値からスタート
+      // 新しいセッションを、前回の最新値からスタート
       history = [];
       if (last) {
         history.push({ ts: Date.now(), rate: lastRate });
@@ -586,21 +582,21 @@ if (btnReset) {
   });
 }
 
-// ==== 全投票データ完全リセット ====
+// ===== 全投票データ完全リセット =====
 
 if (btnResetAll) {
   btnResetAll.addEventListener("click", async () => {
     const ok = confirm(
-      "現在セッション＋過去3セッションのグラフをすべて削除します。\n本当に完全リセットしますか？"
+      "現在セッション＋過去セッションのグラフをすべて削除します。\n本当に完全リセットしますか？"
     );
     if (!ok) return;
 
     try {
-      // server.js に /api/admin/reset-all がある前提
+      // server.js 側に /api/admin/reset-all がある前提
       const res = await fetch("/api/admin/reset-all", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset all");
 
-      // すべての履歴をクリア
+      // 全履歴クリア（クライアント側）
       history = [];
       prevSessions = [];
       resetCount = 0;
@@ -616,7 +612,7 @@ if (btnResetAll) {
   });
 }
 
-// ==== ログイン ====
+// ===== ログイン =====
 
 btnUnlock.addEventListener("click", unlock);
 pwInput.addEventListener("keydown", (e) => {
