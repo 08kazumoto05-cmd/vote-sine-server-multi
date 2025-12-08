@@ -2,6 +2,7 @@
 // ● 現在セッション & 過去セッションのグラフ
 //   ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
 //   ・範囲は -100〜+100（マイナスも表示）
+//   ・グラフの 1点目だけ 0地点からスタート（表示上の調整）
 //   ・Y軸の数値ラベルは表示しない
 // ● セッション1〜3連結グラフ
 //   ・0〜100% のプラス表示のみ（マイナスは0にクリップ）
@@ -191,7 +192,7 @@ function addRatePoint(rate) {
   }
 }
 
-// ==== 現在セッションのグラフ描画（-100〜+100 / ラベルなし） ====
+// ==== 現在セッションのグラフ描画（-100〜+100 / ラベルなし / 1点目は0表示） ====
 
 function drawLineChart() {
   const w = canvas.width;
@@ -277,7 +278,12 @@ function drawLineChart() {
   ctx.beginPath();
 
   history.forEach((p, i) => {
-    let v = Math.max(minY, Math.min(maxY, p.rate));
+    // 生データを -100〜100 にクリップ
+    let raw = Math.max(minY, Math.min(maxY, p.rate));
+    // 各セッションのスタートは 0 からに見せたいので、
+    // 1点目だけ v=0 にする（2点目以降は raw を使用）
+    let v = (i === 0) ? 0 : raw;
+
     const ratio = (v - minY) / (maxY - minY);
     const y = h - B - plotH * ratio;
     const x = L + i * stepX;
@@ -291,7 +297,7 @@ function drawLineChart() {
   requestAnimationFrame(drawLineChart);
 }
 
-// ==== 過去セッションのグラフ描画（-100〜+100 / ラベルなし） ====
+// ==== 過去セッションのグラフ描画（-100〜+100 / ラベルなし / 1点目は0表示） ====
 
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
@@ -378,7 +384,11 @@ function drawPrevSessions() {
     pctx.beginPath();
 
     hist.forEach((p, idx) => {
-      let v = Math.max(minY, Math.min(maxY, p.rate));
+      // 生データを -100〜100 にクリップ
+      let raw = Math.max(minY, Math.min(maxY, p.rate));
+      // 1点目だけ 0 にして描画（表示用）
+      let v = (idx === 0) ? 0 : raw;
+
       const ratio = (v - minY) / (maxY - minY);
       const y = h - B - plotH * ratio;
       const x = L + idx * stepX;
@@ -394,6 +404,8 @@ function drawPrevSessions() {
 // セッション1→2→3 を 1 本の線のように見せる。
 // 値は 0〜100% にクリップし、色は各セッション色。
 // Y軸の数値ラベルは表示しない（補助線のみ）。
+// ★ここは「前セッション最終地点」と「次セッションの始点」が
+//   滑らかにつながるようにするため、元の rate をそのまま使用（0スタート補正はしない）。
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
