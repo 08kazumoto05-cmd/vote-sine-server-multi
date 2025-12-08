@@ -178,24 +178,24 @@
           </div>
         </div>
 
-        <!-- コメント一覧 -->
+        <!-- ★ セッション1〜3 連結グラフ（コメントより上に配置） -->
+        <div class="card">
+          <div class="card-header-row">
+            <h2 class="card-title">セッション1〜3 連結グラフ</h2>
+            <span class="card-caption">
+              セッション1 → 2 → 3 の順に、前のセッションの最終値から次のセッションのスタートがつながるように表示します。
+            </span>
+          </div>
+          <canvas id="sessionChain" width="900" height="200"></canvas>
+        </div>
+
+        <!-- コメント一覧（連結グラフの下に移動） -->
         <div class="card">
           <h2 class="card-title">コメントタイムライン</h2>
           <p class="card-caption">
             新しいコメントが上に表示されます。
           </p>
           <div id="comment-list" class="comment-list"></div>
-        </div>
-
-        <!-- セッション1〜3 連結グラフ -->
-        <div class="card">
-          <div class="card-header-row">
-            <h2 class="card-title">セッション1〜3 連結グラフ</h2>
-            <span class="card-caption">
-              セッション1 → 2 → 3 の順に、前のセッションの最終値から次のセッションのスタートがつながるように 1 本の線で表示します。
-            </span>
-          </div>
-          <canvas id="sessionChain" width="900" height="200"></canvas>
         </div>
       </section>
     </main>
