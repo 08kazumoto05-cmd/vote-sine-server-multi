@@ -3,13 +3,11 @@
 //   ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
 //   ・範囲は 0〜100（マイナスは 0 にクリップ）
 //   ・各セッションのグラフは「必ず 0 からスタート」して見せる
-//     → ロジック上、各セッションの最初に rate:0 のダミー点を1つ入れる
 // ● セッション1〜3連結グラフ
 //   ・0〜100% のプラス表示のみ
 //   ・色はセッションごと（青→赤→緑）
 //   ・前セッションの終点と次セッションの始点が
 //     見た目上つながるようにオフセット補正
-//     （2・3セッション目はダミー0点を無視して連結）
 // ● リセット系
 //   ・「投票データをリセット」：現在セッションを過去セッション配列に保存（最大3）
 //   ・「全投票データを完全リセット」：履歴とリセット回数を全削除
@@ -55,6 +53,11 @@ const prevNotes = [
   document.getElementById("prevChart-note1"),
   document.getElementById("prevChart-note2"),
   document.getElementById("prevChart-note3")
+];
+const prevRateLabels = [
+  document.getElementById("prevChart-rate1"),
+  document.getElementById("prevChart-rate2"),
+  document.getElementById("prevChart-rate3")
 ];
 const prevCtxs = prevCanvases.map((c) => (c ? c.getContext("2d") : null));
 
@@ -178,31 +181,15 @@ async function fetchResults() {
 }
 
 // ==== 履歴管理 ====
-// 各セッションの最初の追加時だけ：
-//   history = [] のとき
-//   → 先に rate:0 のダミー点を push
-//   → その後、最初の実データ(rate)を push
-// これで「0 からスタート & 1票目もちゃんと線で反映」
 
 function addRatePoint(rate) {
   const now = Date.now();
   if (rate === null) return;
 
-  // セッション最初のデータ
-  if (history.length === 0) {
-    // 0% のダミー点（スタート地点）
-    history.push({ ts: now - 1, rate: 0 });
+  const last = history[history.length - 1];
+  if (last && last.rate === rate) return; // 同じ値は追加しない
 
-    // 最初の実データが 0 でなければ、そのまま追加
-    if (rate !== 0) {
-      history.push({ ts: now, rate });
-    }
-  } else {
-    const last = history[history.length - 1];
-    if (last && last.rate === rate) return; // 同じ値は追加しない
-
-    history.push({ ts: now, rate });
-  }
+  history.push({ ts: now, rate });
 
   if (history.length > 200) {
     history = history.slice(-200);
@@ -210,8 +197,7 @@ function addRatePoint(rate) {
 }
 
 // ==== 現在セッションのグラフ描画 ====
-// 先頭にダミー 0 点が入っているので、
-// 特別な「i===0 のときだけ 0 にする」処理は不要。
+// 表示上：1点目を必ず 0 として描画（0スタートに見せる）
 
 function drawLineChart() {
   const w = canvas.width;
@@ -311,8 +297,10 @@ function drawLineChart() {
   ctx.beginPath();
 
   history.forEach((p, i) => {
+    // 1点目だけは 0 として描画（0スタート演出）
+    const displayRate = i === 0 ? 0 : p.rate;
     const x = L + i * stepX;
-    const y = valueToY(p.rate, h, B, plotH);
+    const y = valueToY(displayRate, h, B, plotH);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -333,14 +321,15 @@ function drawLineChart() {
 }
 
 // ==== 過去セッションのグラフ描画 ====
-// prevSessions にもダミー 0 点が含まれているので、そのまま描画すれば
-// 各セッションは 0 からスタートして見える。
+// ・各セッション 1 点目は 0 として描画（0スタート）
+// ・右横に「最終理解度：◯◯％」を表示
 
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
     const session = prevSessions[i];
     const c = prevCanvases[i];
     const note = prevNotes[i];
+    const rateLabel = prevRateLabels[i];
     const pctx = prevCtxs[i];
 
     if (!c || !pctx) continue;
@@ -357,6 +346,9 @@ function drawPrevSessions() {
         const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : "3つ前";
         note.textContent = `${label}のセッション：まだグラフはありません。`;
       }
+      if (rateLabel) {
+        rateLabel.textContent = "";
+      }
       continue;
     }
 
@@ -366,6 +358,15 @@ function drawPrevSessions() {
     if (note) {
       const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : "3つ前";
       note.textContent = `${label}のセッション：理解度の推移（0〜100％）`;
+    }
+
+    // ★ 最終理解度％を表示
+    if (rateLabel) {
+      const lastPoint = hist[hist.length - 1];
+      let lastRate = lastPoint ? lastPoint.rate : 0;
+      if (lastRate < 0) lastRate = 0;
+      if (lastRate > 100) lastRate = 100;
+      rateLabel.textContent = `（最終理解度：${Math.round(lastRate)}%）`;
     }
 
     const L = 40, R = 15, T = 15, B = 25;
@@ -426,15 +427,16 @@ function drawPrevSessions() {
 
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
 
-    // セッションごとの色で線を描画
+    // セッションごとの色で線を描画（1点目は0）
     pctx.strokeStyle = color || "#4fc3f7";
     pctx.lineWidth = 2;
     pctx.setLineDash([]);
     pctx.beginPath();
 
     hist.forEach((p, idx) => {
+      const displayRate = idx === 0 ? 0 : p.rate;
       const x = L + idx * stepX;
-      const y = valueToY(p.rate, h, B, plotH);
+      const y = valueToY(displayRate, h, B, plotH);
       if (idx === 0) pctx.moveTo(x, y);
       else pctx.lineTo(x, y);
     });
@@ -445,8 +447,6 @@ function drawPrevSessions() {
 // ==== セッション1〜3 連結グラフ ====
 // セッション1→2→3 を 1 本の線のように見せる。
 // 値は 0〜100% にクリップし、色は各セッション色。
-// 2・3セッション目は「ダミー 0 点」をスキップして、
-// 前セッションの終点と自然につながるように描画する。
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
@@ -474,16 +474,10 @@ function drawSessionChain() {
     return;
   }
 
-  // ダミー0点を考慮した「実際に描画する点数」を数える
-  const totalPoints = sessions.reduce((sum, s, idx) => {
-    const hist = s.points || [];
-    if (hist.length === 0) return sum;
-    // 最初のセッションはそのまま全部描画
-    if (idx === 0) return sum + hist.length;
-    // 2つ目以降のセッションは、ダミー0点(先頭)を除いてカウント
-    return sum + Math.max(0, hist.length - 1);
-  }, 0);
-
+  const totalPoints = sessions.reduce(
+    (sum, s) => sum + (s.points ? s.points.length : 0),
+    0
+  );
   if (totalPoints < 2) {
     sessionChainCtx.fillStyle = "#CCCCCC";
     sessionChainCtx.font = "14px sans-serif";
@@ -530,10 +524,6 @@ function drawSessionChain() {
     sessionChainCtx.moveTo(L, y);
     sessionChainCtx.lineTo(w - R, y);
     sessionChainCtx.stroke();
-
-    sessionChainCtx.setLineDash([]);
-    sessionChainCtx.fillStyle = "#FFFFFF";
-    sessionChainCtx.fillText(v + "%", L - 6, y);
   });
 
   // X補助線
@@ -560,13 +550,8 @@ function drawSessionChain() {
     const hist = session.points || [];
     if (hist.length === 0) return;
 
-    // 1セッション目は先頭から描画
-    // 2・3セッション目はダミー0点(先頭)を飛ばして描画
-    const startIdx = (sIdx === 0) ? 0 : 1;
-    if (hist.length <= startIdx) return;
-
-    // このセッションの「実際のスタート値」
-    const firstRateOrig = Math.max(0, Math.min(100, hist[startIdx].rate));
+    // このセッションの元の最初の値（0〜100にクリップ）
+    const firstRateOrig = Math.max(0, Math.min(100, hist[0].rate));
 
     // 補正量：前セッションの終点と Y がつながるように
     let offset = 0;
@@ -585,8 +570,10 @@ function drawSessionChain() {
     sessionChainCtx.setLineDash([]);
     sessionChainCtx.beginPath();
 
-    for (let idx = startIdx; idx < hist.length; idx++) {
-      let base = Math.max(0, Math.min(100, hist[idx].rate));
+    hist.forEach((p, idx) => {
+      // 連結グラフでは本来の rate をそのまま使い、
+      // 0〜100 にクリップ & オフセットだけかける
+      let base = Math.max(0, Math.min(100, p.rate));
       let adjRate = base + offset;
       if (adjRate < 0) adjRate = 0;
       if (adjRate > 100) adjRate = 100;
@@ -595,11 +582,9 @@ function drawSessionChain() {
       const y = valueToY(adjRate, h, B, plotH);
 
       if (globalIndex === 0) {
-        // 全体の最初の点
         sessionChainCtx.moveTo(x, y);
-      } else if (idx === startIdx) {
-        // セッション切り替えの最初の点：
-        // 直前の点からそのまま線を伸ばして 1 本に見せる
+      } else if (idx === 0) {
+        // セッション切り替えの最初の点：直前からつなぐ
         sessionChainCtx.moveTo(lastX, lastY);
         sessionChainCtx.lineTo(x, y);
       } else {
@@ -610,7 +595,7 @@ function drawSessionChain() {
       lastY = y;
       lastAdjRate = adjRate;
       globalIndex++;
-    }
+    });
 
     sessionChainCtx.stroke();
   });

@@ -131,7 +131,7 @@
           </div>
         </div>
 
-        <!-- ① グラフエリア（現在セッション） -->
+        <!-- グラフエリア（現在セッション） -->
         <div class="card large">
           <div class="card-header-row">
             <h2 class="card-title">理解度(理解 − 不理解) の推移</h2>
@@ -142,7 +142,7 @@
           <canvas id="sineCanvas" width="900" height="260"></canvas>
         </div>
 
-        <!-- ② 過去3セッションのグラフ -->
+        <!-- 過去3セッションのグラフ（最終理解度％付き） -->
         <div class="card">
           <div class="card-header-row">
             <h2 class="card-title">過去セッションの理解度推移</h2>
@@ -154,31 +154,40 @@
           <div class="prev-session-wrap">
             <!-- 直近のひとつ前 -->
             <div class="prev-session-block">
-              <p id="prevChart-note1" class="card-caption">
-                1つ前のセッション：まだグラフはありません。
+              <p class="card-caption">
+                <span id="prevChart-note1">
+                  1つ前のセッション：まだグラフはありません。
+                </span>
+                <span id="prevChart-rate1" class="prev-session-rate"></span>
               </p>
               <canvas id="prevChart1" width="900" height="120"></canvas>
             </div>
 
             <!-- 2つ前 -->
             <div class="prev-session-block">
-              <p id="prevChart-note2" class="card-caption">
-                2つ前のセッション：まだグラフはありません。
+              <p class="card-caption">
+                <span id="prevChart-note2">
+                  2つ前のセッション：まだグラフはありません。
+                </span>
+                <span id="prevChart-rate2" class="prev-session-rate"></span>
               </p>
               <canvas id="prevChart2" width="900" height="120"></canvas>
             </div>
 
             <!-- 3つ前 -->
             <div class="prev-session-block">
-              <p id="prevChart-note3" class="card-caption">
-                3つ前のセッション：まだグラフはありません。
+              <p class="card-caption">
+                <span id="prevChart-note3">
+                  3つ前のセッション：まだグラフはありません。
+                </span>
+                <span id="prevChart-rate3" class="prev-session-rate"></span>
               </p>
               <canvas id="prevChart3" width="900" height="120"></canvas>
             </div>
           </div>
         </div>
 
-        <!-- ③ セッション1〜3 連結グラフ -->
+        <!-- セッション1〜3 連結グラフ（コメントより上） -->
         <div class="card">
           <div class="card-header-row">
             <h2 class="card-title">セッション1〜3 連結グラフ</h2>
@@ -189,7 +198,7 @@
           <canvas id="sessionChain" width="900" height="200"></canvas>
         </div>
 
-        <!-- ④ コメント一覧（いちばん下） -->
+        <!-- コメント一覧（連結グラフの下） -->
         <div class="card">
           <h2 class="card-title">コメントタイムライン</h2>
           <p class="card-caption">
