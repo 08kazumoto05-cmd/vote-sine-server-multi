@@ -6,10 +6,10 @@
 // ● 「投票データをリセット」
 //   現在セッションの履歴を過去セッションに保存（最大3件）
 // ● 「セッション1〜3連結グラフ」
-//   セッション1→2→3 を 1 本の線の形で連結して表示
+//   セッション1→2→3 を 1 本の線のように連結して表示
 //   ・各セッション内部の値は 0〜100% のまま
 //   ・連結グラフのみ、前セッションの終点と次セッションの始点が
-//     見た目上ぴったり同じ高さになるように Y を補正
+//     “見た目上” 連続するように Y を補正
 // ● 「全投票データを完全リセット」
 //   現在セッション＋過去3セッションの履歴をすべて削除
 
@@ -55,9 +55,9 @@ const prevNotes = [
   document.getElementById("prevChart-note2"),
   document.getElementById("prevChart-note3")
 ];
-const prevCtxs = prevCanvases.map(c => (c ? c.getContext("2d") : null));
+const prevCtxs = prevCanvases.map((c) => (c ? c.getContext("2d") : null));
 
-// セッション1〜3連結グラフ用キャンバス
+// ★ セッション1〜3連結グラフ用キャンバス
 const sessionChainCanvas = document.getElementById("sessionChain");
 const sessionChainCtx = sessionChainCanvas
   ? sessionChainCanvas.getContext("2d")
@@ -69,8 +69,8 @@ const sessionChainCtx = sessionChainCanvas
 let history = [];
 
 // 過去セッション（最大3つ）
-// 先頭: 一番新しいセッション
-// 形式: { color: "#xxxxxx", points: [{ts, rate}, ...] }
+// [{ color: "#xxxxxx", points: [{ts, rate}, ...] }, ...]
+// 先頭が「一番最近のセッション」
 let prevSessions = [];
 
 // リセット回数（0:初回, 1:1回目リセット後, 2:2回目リセット後…）
@@ -79,12 +79,12 @@ let resetCount = 0;
 // セッションごとの色
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a"];
 
-// 描画ループフラグ
+// 描画ループ開始済みか
 let animationStarted = false;
 
 // ==== ユーティリティ ====
 
-// 現在セッションの色
+// 現在セッションの色を取得
 function getCurrentColor() {
   const idx = Math.min(resetCount, SESSION_COLORS.length - 1);
   return SESSION_COLORS[idx];
@@ -405,6 +405,7 @@ function drawPrevSessions() {
 
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
 
+    // セッションごとの色で線を描画
     pctx.strokeStyle = color || "#4fc3f7";
     pctx.lineWidth = 2;
     pctx.setLineDash([]);
@@ -421,10 +422,8 @@ function drawPrevSessions() {
 }
 
 // ==== セッション1〜3 連結グラフ ====
-// セッション1→2→3 を 1 本の線の形で連続させる。
-// ・各セッション内部の形は維持
-// ・連結グラフのみ、前セッション終点と次セッション始点の高さを
-//   ぴったり一致させるためにオフセットをかける。
+// セッション1→2→3 を 1 本の線のように見せる。
+// 値は 0〜100% にクリップし、色は各セッション色。
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
@@ -436,7 +435,7 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#000000";
   sessionChainCtx.fillRect(0, 0, w, h);
 
-  // 最新から3件まで → 古い順に並べ替え
+  // 最新から 3 件まで取り出し、古い順に並べ替える
   const sessionsNewestFirst = prevSessions.slice(0, 3);
   const sessions = sessionsNewestFirst
     .slice()
@@ -452,44 +451,8 @@ function drawSessionChain() {
     return;
   }
 
-  // まず、各セッションごとに「補正後の値」を計算しておく
-  // sessionsWithAdj = [{ color, adjRates: [..] }, ...]
-  const sessionsWithAdj = [];
-  let prevLastAdjRate = null;
-
-  sessions.forEach((session, idx) => {
-    const hist = session.points;
-    if (!hist || hist.length === 0) return;
-
-    const firstRate = hist[0].rate;
-    let offset = 0;
-
-    if (idx === 0 || prevLastAdjRate == null) {
-      offset = 0;
-    } else {
-      // 「前セッションの最終値」と「このセッションの最初の値」が
-      // ぴったり同じになるように補正
-      offset = prevLastAdjRate - firstRate;
-    }
-
-    const adjRates = hist.map(p => {
-      let v = p.rate + offset;
-      if (v < 0) v = 0;
-      if (v > 100) v = 100;
-      return v;
-    });
-
-    prevLastAdjRate = adjRates[adjRates.length - 1];
-
-    sessionsWithAdj.push({
-      color: session.color,
-      adjRates
-    });
-  });
-
-  // 全ポイント数
-  const totalPoints = sessionsWithAdj.reduce(
-    (sum, s) => sum + s.adjRates.length,
+  const totalPoints = sessions.reduce(
+    (sum, s) => sum + (s.points ? s.points.length : 0),
     0
   );
   if (totalPoints < 2) {
@@ -559,13 +522,25 @@ function drawSessionChain() {
 
   const stepX = totalPoints > 1 ? plotW / (totalPoints - 1) : 0;
 
-  // 実際に描画（色はセッションごとに変えつつ、形は 1 本の折れ線）
   let globalIndex = 0;
+  let lastX = null;
   let lastY = null;
+  let lastAdjRate = null;
 
-  sessionsWithAdj.forEach((session, sIdx) => {
-    const adjRates = session.adjRates;
-    if (!adjRates || adjRates.length === 0) return;
+  sessions.forEach((session, sIdx) => {
+    const hist = session.points || [];
+    if (hist.length === 0) return;
+
+    // このセッションの元の最初の値
+    const firstRate = Math.max(0, Math.min(100, hist[0].rate));
+
+    // 補正量：前セッションの終点と Y がつながるように
+    let offset = 0;
+    if (sIdx === 0 || lastAdjRate == null) {
+      offset = 0;
+    } else {
+      offset = lastAdjRate - firstRate;
+    }
 
     const color =
       session.color ||
@@ -576,24 +551,30 @@ function drawSessionChain() {
     sessionChainCtx.setLineDash([]);
     sessionChainCtx.beginPath();
 
-    adjRates.forEach((rate, idx) => {
+    hist.forEach((p, idx) => {
+      let base = Math.max(0, Math.min(100, p.rate));
+      let adjRate = base + offset;
+      if (adjRate < 0) adjRate = 0;
+      if (adjRate > 100) adjRate = 100;
+
       const x = L + stepX * globalIndex;
-      const y = valueToY(rate, h, B, plotH);
+      const y = valueToY(adjRate, h, B, plotH);
 
       if (globalIndex === 0) {
         // 全体の最初の点
         sessionChainCtx.moveTo(x, y);
       } else if (idx === 0) {
         // セッション切り替えの最初の点：
-        // 直前の最終点(lastY)から、色だけ変えて連続して描く
-        const prevX = L + stepX * (globalIndex - 1);
-        sessionChainCtx.moveTo(prevX, lastY);
+        // 直前の点からそのまま線を伸ばして 1 本に見せる
+        sessionChainCtx.moveTo(lastX, lastY);
         sessionChainCtx.lineTo(x, y);
       } else {
         sessionChainCtx.lineTo(x, y);
       }
 
+      lastX = x;
       lastY = y;
+      lastAdjRate = adjRate;
       globalIndex++;
     });
 
@@ -606,7 +587,7 @@ function drawSessionChain() {
   sessionChainCtx.textAlign = "left";
   sessionChainCtx.textBaseline = "top";
   sessionChainCtx.fillText(
-    "セッション1→2→3 連結グラフ（形は1本の線 / 色は青→赤→緑 / 0〜100％）",
+    "セッション1→2→3 連結グラフ（形は1本の線 / 色はセッションごと / 0〜100％）",
     L + 4,
     4
   );
@@ -766,7 +747,8 @@ if (btnReset) {
 
       // 新しいセッションの履歴をクリア
       history = [];
-      // 各セッションは 0 からスタート（初期点は入れず、最初の投票から描画）
+      // 各セッションのグラフは 0 からスタートさせたいなら、
+      // ここで 0 の初期点を入れてもOK（今回は入れない）
 
       await fetchResults();
       alert("投票データをリセットしました。");
@@ -809,7 +791,7 @@ if (btnResetAll) {
 // ==== ログイン ====
 
 btnUnlock.addEventListener("click", unlock);
-pwInput.addEventListener("keydown", e => {
+pwInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") unlock();
 });
 
