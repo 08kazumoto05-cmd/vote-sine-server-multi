@@ -5,7 +5,8 @@
 // ● 過去セッションは最大3つ保存
 // ● セッション1〜3連結グラフ：
 //   「一番古いセッション」→「……」→「いちばん新しいセッション（現在含む）」を
-//   1 本の線に見えるように連結する
+//   1 本の線の形でつなげるが、色はセッションごとに
+//   1: 青 / 2: 赤 / 3: 緑 で表示
 
 const ADMIN_PASSWORD = "admin123";
 
@@ -421,7 +422,8 @@ function drawPrevSessions() {
 }
 
 // ==== セッション1〜3 連結グラフ ====
-// 「一番古いセッション」→「……」→「現在セッション」を 1 本の線で表示
+// 「一番古いセッション」→「……」→「現在セッション」を 1 本の形で表示
+// ただし区間ごとに色はセッション色（青→赤→緑）
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
@@ -433,26 +435,31 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#000000";
   sessionChainCtx.fillRect(0, 0, w, h);
 
-  // ------------------------------
-  // 1. セッションの順番を決める
-  //    ・prevSessions: [最新, 2番目, 3番目] なので
-  //      古い順 = reverse()
-  //    ・最後に「現在セッション（history）」も末尾に追加
-  //    ・その中から「末尾3つ」を使う
-  // ------------------------------
+  // 1. セッションを「古い順」に並べる
   const list = [];
 
-  // 古い順に並べた過去セッション
-  const oldOrdered = prevSessions
+  // prevSessions: [最新, 2番目, 3番目] → reverse() で古い順
+  const orderedPast = prevSessions
     .slice()
     .reverse()
     .filter((s) => s && s.points && s.points.length > 0);
 
-  oldOrdered.forEach((s) => list.push({ type: "past", points: s.points }));
+  // 古い順の過去セッションを入れる
+  orderedPast.forEach((s) => {
+    list.push({
+      kind: "past",
+      color: s.color || SESSION_COLORS[0],
+      points: s.points
+    });
+  });
 
-  // 現在セッションも最後に追加
+  // 現在セッションがあれば最後に追加
   if (history && history.length > 0) {
-    list.push({ type: "current", points: history });
+    list.push({
+      kind: "current",
+      color: getCurrentColor(),
+      points: history
+    });
   }
 
   if (list.length === 0) {
@@ -468,38 +475,18 @@ function drawSessionChain() {
     return;
   }
 
-  // 末尾3つだけを使う（セッション1〜3相当）
+  // 末尾3つだけ（最大3セッション）
   const sessions = list.slice(-3);
 
-  // ------------------------------
-  // 2. 一本の配列に連結しつつ、
-  //    「前セッションの最後の値」にピッタリつながるようオフセット
-  // ------------------------------
-  let combined = [];
-  let prevLastRate = null;
-
-  sessions.forEach((session) => {
-    const raw = session.points;
-    if (!raw || raw.length === 0) return;
-
-    const adjusted = raw.map((p) => ({ ts: p.ts, rate: p.rate }));
-
-    if (prevLastRate !== null && adjusted.length > 0) {
-      const offset = prevLastRate - adjusted[0].rate;
-      adjusted.forEach((p) => {
-        let v = p.rate + offset;
-        if (v < 0) v = 0;
-        if (v > 100) v = 100;
-        p.rate = v;
-      });
+  // 全体のポイント数をカウント（連結後のX座標計算用）
+  let totalPoints = 0;
+  sessions.forEach((s) => {
+    if (s.points && s.points.length > 0) {
+      totalPoints += s.points.length;
     }
-
-    combined = combined.concat(adjusted);
-    const lastPoint = adjusted[adjusted.length - 1];
-    if (lastPoint) prevLastRate = lastPoint.rate;
   });
 
-  if (combined.length === 0) {
+  if (totalPoints === 0) {
     sessionChainCtx.fillStyle = "#CCCCCC";
     sessionChainCtx.font = "14px sans-serif";
     sessionChainCtx.textAlign = "center";
@@ -566,22 +553,57 @@ function drawSessionChain() {
   sessionChainCtx.setLineDash([]);
 
   const stepX =
-    combined.length > 1 ? plotW / (combined.length - 1) : 0;
+    totalPoints > 1 ? plotW / (totalPoints - 1) : 0;
 
-  // 1本の線として描画（色は青固定）
-  sessionChainCtx.strokeStyle = "#4fc3f7";
-  sessionChainCtx.lineWidth = 2.5;
-  sessionChainCtx.setLineDash([]);
-  sessionChainCtx.beginPath();
+  // 2. セッションごとに
+  //    「前セッションの最後の値」にピッタリつながるようにオフセットしながら
+  //    区間ごとに色を変えて描画
+  let globalIndex = 0;
+  let prevLastRate = null;
 
-  combined.forEach((p, idx) => {
-    const x = L + stepX * idx;
-    const y = valueToYPos(p.rate, h, B, plotH);
-    if (idx === 0) sessionChainCtx.moveTo(x, y);
-    else sessionChainCtx.lineTo(x, y);
+  sessions.forEach((session) => {
+    const raw = session.points;
+    if (!raw || raw.length === 0) return;
+
+    // このセッションのコピーを作成
+    const adjusted = raw.map((p) => ({ ts: p.ts, rate: p.rate }));
+
+    // 先頭点を、前セッションの末尾値にピッタリ合わせる
+    if (prevLastRate !== null && adjusted.length > 0) {
+      const offset = prevLastRate - adjusted[0].rate;
+      adjusted.forEach((p) => {
+        let v = p.rate + offset;
+        if (v < 0) v = 0;
+        if (v > 100) v = 100;
+        p.rate = v;
+      });
+    }
+
+    // このセッション分を、1本の線のように globalIndex を連続させつつ描画
+    sessionChainCtx.strokeStyle = session.color || "#4fc3f7";
+    sessionChainCtx.lineWidth = 2.5;
+    sessionChainCtx.setLineDash([]);
+    sessionChainCtx.beginPath();
+
+    adjusted.forEach((p) => {
+      const x = L + stepX * globalIndex;
+      const y = valueToYPos(p.rate, h, B, plotH);
+
+      if (globalIndex === 0) {
+        sessionChainCtx.moveTo(x, y);
+      } else {
+        sessionChainCtx.lineTo(x, y);
+      }
+
+      globalIndex++;
+    });
+
+    sessionChainCtx.stroke();
+
+    // 次セッションのために、このセッションの最後の値を保存
+    const lastPoint = adjusted[adjusted.length - 1];
+    if (lastPoint) prevLastRate = lastPoint.rate;
   });
-
-  sessionChainCtx.stroke();
 
   // タイトル
   sessionChainCtx.font = "12px sans-serif";
@@ -589,7 +611,7 @@ function drawSessionChain() {
   sessionChainCtx.textAlign = "left";
   sessionChainCtx.textBaseline = "top";
   sessionChainCtx.fillText(
-    "セッション1 → 2 → 3 連結グラフ（1本の線で表示・0〜100%）",
+    "セッション1 → 2 → 3 連結グラフ（形は1本の線／色はセッションごと）",
     L + 4,
     4
   );
@@ -745,7 +767,7 @@ if (btnReset) {
       // リセット回数を増やす（次のセッションの色変更）
       resetCount++;
 
-      // 新しいセッション：0 からスタート（前セッションとは連結しない）
+      // 新しいセッション：0 からスタート
       history = [];
 
       await fetchResults();
