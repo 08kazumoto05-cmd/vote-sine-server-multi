@@ -2,15 +2,17 @@
 // ● グラフは真ん中が 0 のプラス/マイナス表示
 //   ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
 //   ・想定人数が 0 のときは、(理解 − 不理解) ÷ 投票人数 ×100
-// ● セッションごとに線の色を変える
+// ● セッションごとに線の色を変える（現在セッションの大きなグラフ）
 //   0回目(初回) : 青
 //   1回目リセット後 : 赤
 //   2回目リセット後 : 緑
 // ● 「投票データをリセット」
-//   その時点までの線を過去セッションに保存し、
-//   その時の最新値から次のセッションをスタート（線がつながるイメージ）
+//   その時点までの線を過去セッションに保存するが、
+//   次のセッションのグラフとは“連結させない”（新しい線としてスタート）
 // ● 「全投票データを完全リセット」
-//   現在セッション＋過去3セッションの履歴を全部削除
+//   現在セッション＋過去セッションの履歴を全部削除
+// ● 下の「セッション1〜3連結グラフ」は、過去セッションだけを
+//   1本の時間軸として連結して表示する（現在セッションとは別）
 
 const ADMIN_PASSWORD = "admin123";
 
@@ -75,7 +77,7 @@ let prevSessions = [];
 // リセット回数（0:初回, 1:1回目リセット後, 2:2回目リセット後…）
 let resetCount = 0;
 
-// セッションごとの色
+// セッションごとの色（現在セッション用）
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a"];
 
 // 描画ループ開始済みか
@@ -83,7 +85,7 @@ let animationStarted = false;
 
 // ==== ユーティリティ ====
 
-// 現在セッションの色を取得
+// 現在セッションの色を取得（初回:青 / 1回目リセット後:赤 / 2回目以降:緑）
 function getCurrentColor() {
   const idx = Math.min(resetCount, SESSION_COLORS.length - 1);
   return SESSION_COLORS[idx];
@@ -91,7 +93,6 @@ function getCurrentColor() {
 
 // -100〜100 の値をキャンバスY座標に変換
 function valueToY(value, canvasHeight, bottomPadding, plotHeight) {
-  // クリップ
   let v = Math.max(-100, Math.min(100, value));
   // -100 → 下端, 0 → 中央, 100 → 上端
   const ratio = (v + 100) / 200; // 0〜1
@@ -118,7 +119,7 @@ async function fetchResults() {
     numNotUnderstood.textContent = n;
     numTotal.textContent = total;
 
-    // 表示用理解率（普通の％）
+    // 表示用理解率（普通の％：理解できた / 合計）
     const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
     rateUnderstood.textContent = rateDisplay + "%";
 
@@ -132,10 +133,11 @@ async function fetchResults() {
       } else if (total === 0 && history.length === 0) {
         rate = null; // 何も描かない
       } else {
+        // ★ 今まで通りの計算式（＋/−方式）
         rate = ((u - n) / maxP) * 100;
       }
     } else {
-      // 想定人数が0 → 代わりに投票人数を分母にする
+      // 想定人数が0 → 投票人数を分母
       if (total > 0) {
         rate = ((u - n) / total) * 100;
       } else if (history.length > 0) {
@@ -203,13 +205,13 @@ function addRatePoint(rate) {
   }
 }
 
-// ==== 現在セッションのグラフ描画（スロット風） ====
+// ==== 現在セッションのグラフ描画 ====
 
 function drawLineChart() {
   const w = canvas.width;
   const h = canvas.height;
 
-  // 背景を黒で塗る
+  // 背景黒
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
 
@@ -230,7 +232,7 @@ function drawLineChart() {
   const plotW = w - L - R;
   const plotH = h - T - B;
 
-  // 外枠（白）
+  // 外枠
   ctx.strokeStyle = "#FFFFFF";
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
@@ -271,7 +273,7 @@ function drawLineChart() {
     ctx.fillText(v + "%", L - 6, y);
   });
 
-  // X方向補助線（1/4,1/2,3/4に白点線）
+  // X方向補助線（1/4,1/2,3/4）
   ctx.strokeStyle = "#FFFFFF";
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
@@ -287,7 +289,7 @@ function drawLineChart() {
   // X座標
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
 
-  // 現在セッションの色（初回:青 / 1回目リセット後:赤 / 2回目以降:緑）
+  // 現在セッションの色
   const currentColor = getCurrentColor();
 
   // 折れ線
@@ -437,7 +439,6 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#000000";
   sessionChainCtx.fillRect(0, 0, w, h);
 
-  // 古い順に並べたいので、prevSessions を逆順（末尾がいちばん古い）
   const sessions = prevSessions.slice(0, 3);
   if (sessions.length === 0) {
     sessionChainCtx.fillStyle = "#CCCCCC";
@@ -448,9 +449,10 @@ function drawSessionChain() {
     return;
   }
 
-  const ordered = sessions.slice().reverse(); // [一番古い, …, 一番新しい]
+  // 古い順：[セッション1, セッション2, セッション3]
+  const ordered = sessions.slice().reverse();
 
-  // 合計ポイント数を数える
+  // 合計ポイント数
   let totalPoints = 0;
   ordered.forEach((s) => {
     if (s && s.points) totalPoints += s.points.length;
@@ -482,7 +484,7 @@ function drawSessionChain() {
   sessionChainCtx.lineTo(w - R, h - B);
   sessionChainCtx.stroke();
 
-  // Y軸目盛 (-100, -50, 0, 50, 100)
+  // Y軸目盛
   const yTicks = [-100, -50, 0, 50, 100];
   sessionChainCtx.font = "10px sans-serif";
   sessionChainCtx.textAlign = "right";
@@ -526,14 +528,16 @@ function drawSessionChain() {
 
   const stepX = totalPoints > 1 ? plotW / (totalPoints - 1) : 0;
 
-  // セッション1→2→3 が一続きになるように、globalIndexでXを進める
+  // セッション1→2→3 を連続した1本の線として描画（色はセッションごと）
   let globalIndex = 0;
 
   ordered.forEach((session, sIdx) => {
     if (!session || !session.points || session.points.length === 0) return;
 
     const hist = session.points;
-    const color = session.color || SESSION_COLORS[Math.min(sIdx, SESSION_COLORS.length - 1)];
+    const color =
+      session.color ||
+      SESSION_COLORS[Math.min(sIdx, SESSION_COLORS.length - 1)];
 
     sessionChainCtx.strokeStyle = color;
     sessionChainCtx.lineWidth = 2.5;
@@ -546,9 +550,6 @@ function drawSessionChain() {
 
       if (globalIndex === 0) {
         sessionChainCtx.moveTo(x, y);
-      } else if (idx === 0) {
-        // 新しいセッションの1点目も、前の最後の点からそのままつながる
-        sessionChainCtx.lineTo(x, y);
       } else {
         sessionChainCtx.lineTo(x, y);
       }
@@ -569,23 +570,6 @@ function drawSessionChain() {
     L + 4,
     4
   );
-
-  // 凡例（左下）
-  sessionChainCtx.font = "10px sans-serif";
-  sessionChainCtx.textBaseline = "middle";
-
-  const legendY = h - 18;
-  ordered.forEach((session, idx) => {
-    const color = session.color || SESSION_COLORS[Math.min(idx, SESSION_COLORS.length - 1)];
-    const label = `セッション${idx + 1}`;
-    const x = L + idx * 120;
-
-    sessionChainCtx.fillStyle = color;
-    sessionChainCtx.fillRect(x, legendY - 4, 18, 8);
-
-    sessionChainCtx.fillStyle = "#FFFFFF";
-    sessionChainCtx.fillText(label, x + 24, legendY);
-  });
 }
 
 // ==== コメント表示 ====
@@ -710,6 +694,7 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
+// ※ここで「前セッションの最終点からつなげる」をやめる
 
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
@@ -719,9 +704,8 @@ if (btnReset) {
     if (!ok) return;
 
     try {
-      // 現在セッションの最後の値
+      // 現在セッションの最後の値（過去セッション保存用にだけ使う）
       const last = history[history.length - 1];
-      const lastRate = last ? last.rate : 0;
       const currentColor = getCurrentColor();
 
       // 現在セッションを過去セッションに保存（先頭に追加）
@@ -737,14 +721,11 @@ if (btnReset) {
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // リセット回数を増やす（次のセッションの色が変わる）
+      // リセット回数を増やす（次のセッションの色だけ変わる）
       resetCount++;
 
-      // 新しいセッション：前回の最新値からスタート
+      // ★ 新しいセッション：前回の値は引き継がず、完全にゼロから
       history = [];
-      if (last) {
-        history.push({ ts: Date.now(), rate: lastRate });
-      }
 
       await fetchResults();
       alert("投票データをリセットしました。");
@@ -760,7 +741,7 @@ if (btnReset) {
 if (btnResetAll) {
   btnResetAll.addEventListener("click", async () => {
     const ok = confirm(
-      "現在セッション＋過去3セッションのグラフをすべて削除します。\n本当に完全リセットしますか？"
+      "現在セッション＋過去セッションのグラフをすべて削除します。\n本当に完全リセットしますか？"
     );
     if (!ok) return;
 
