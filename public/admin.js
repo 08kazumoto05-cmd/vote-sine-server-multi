@@ -1,17 +1,16 @@
 // admin.js - 管理画面
-// ● グラフは 0〜100% のプラスのみ
-//   値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100（マイナスは 0 にクリップ）
-// ● セッションごとに線の色を変える
-//   0回目(初回) : 青, 1回目リセット後 : 赤, 2回目リセット後 : 緑
-// ● 「投票データをリセット」
-//   現在セッションの履歴を過去セッションに保存（最大3件）
-// ● 「セッション1〜3連結グラフ」
-//   セッション1→2→3 を 1 本の線のように連結して表示
-//   ・各セッション内部の値は 0〜100% のまま
-//   ・連結グラフのみ、前セッションの終点と次セッションの始点が
-//     “見た目上” 連続するように Y を補正
-// ● 「全投票データを完全リセット」
-//   現在セッション＋過去3セッションの履歴をすべて削除
+// ● 現在セッション & 過去セッションのグラフ
+//   ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
+//   ・範囲は 0〜100（マイナスは 0 にクリップ）
+//   ・各セッションのグラフは「必ず 0 からスタート」して見せる
+// ● セッション1〜3連結グラフ
+//   ・0〜100% のプラス表示のみ
+//   ・色はセッションごと（青→赤→緑）
+//   ・前セッションの終点と次セッションの始点が
+//     見た目上つながるようにオフセット補正（※ここは今まで通り）
+// ● リセット系
+//   ・「投票データをリセット」：現在セッションを過去セッション配列に保存（最大3）
+//   ・「全投票データを完全リセット」：履歴とリセット回数を全削除
 
 const ADMIN_PASSWORD = "admin123";
 
@@ -57,7 +56,7 @@ const prevNotes = [
 ];
 const prevCtxs = prevCanvases.map((c) => (c ? c.getContext("2d") : null));
 
-// ★ セッション1〜3連結グラフ用キャンバス
+// セッション1〜3連結グラフ用キャンバス
 const sessionChainCanvas = document.getElementById("sessionChain");
 const sessionChainCtx = sessionChainCanvas
   ? sessionChainCanvas.getContext("2d")
@@ -69,8 +68,8 @@ const sessionChainCtx = sessionChainCanvas
 let history = [];
 
 // 過去セッション（最大3つ）
-// [{ color: "#xxxxxx", points: [{ts, rate}, ...] }, ...]
-// 先頭が「一番最近のセッション」
+// 先頭: 一番新しいセッション
+// 形式: { color: "#xxxxxx", points: [{ts, rate}, ...] }
 let prevSessions = [];
 
 // リセット回数（0:初回, 1:1回目リセット後, 2:2回目リセット後…）
@@ -79,12 +78,12 @@ let resetCount = 0;
 // セッションごとの色
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a"];
 
-// 描画ループ開始済みか
+// 描画ループフラグ
 let animationStarted = false;
 
 // ==== ユーティリティ ====
 
-// 現在セッションの色を取得
+// 現在セッションの色
 function getCurrentColor() {
   const idx = Math.min(resetCount, SESSION_COLORS.length - 1);
   return SESSION_COLORS[idx];
@@ -193,6 +192,7 @@ function addRatePoint(rate) {
 }
 
 // ==== 現在セッションのグラフ描画 ====
+// ※ 表示上は「各セッションの 1 点目だけ 0 として描画」する
 
 function drawLineChart() {
   const w = canvas.width;
@@ -292,8 +292,10 @@ function drawLineChart() {
   ctx.beginPath();
 
   history.forEach((p, i) => {
+    // ★ 1 点目だけは「必ず 0 として描画」
+    const displayRate = i === 0 ? 0 : p.rate;
     const x = L + i * stepX;
-    const y = valueToY(p.rate, h, B, plotH);
+    const y = valueToY(displayRate, h, B, plotH);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -314,6 +316,7 @@ function drawLineChart() {
 }
 
 // ==== 過去セッションのグラフ描画 ====
+// ※ こちらも表示上は「各セッション 1 点目を 0 として描画」
 
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
@@ -412,8 +415,10 @@ function drawPrevSessions() {
     pctx.beginPath();
 
     hist.forEach((p, idx) => {
+      // ★ ここも 1 点目だけ 0 として表示
+      const displayRate = idx === 0 ? 0 : p.rate;
       const x = L + idx * stepX;
-      const y = valueToY(p.rate, h, B, plotH);
+      const y = valueToY(displayRate, h, B, plotH);
       if (idx === 0) pctx.moveTo(x, y);
       else pctx.lineTo(x, y);
     });
@@ -424,6 +429,7 @@ function drawPrevSessions() {
 // ==== セッション1〜3 連結グラフ ====
 // セッション1→2→3 を 1 本の線のように見せる。
 // 値は 0〜100% にクリップし、色は各セッション色。
+// ★ ここでは「本来の rate」をそのまま使う（1点目を 0 にはしない）
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
@@ -531,15 +537,15 @@ function drawSessionChain() {
     const hist = session.points || [];
     if (hist.length === 0) return;
 
-    // このセッションの元の最初の値
-    const firstRate = Math.max(0, Math.min(100, hist[0].rate));
+    // このセッションの元の最初の値（0〜100にクリップ）
+    const firstRateOrig = Math.max(0, Math.min(100, hist[0].rate));
 
     // 補正量：前セッションの終点と Y がつながるように
     let offset = 0;
     if (sIdx === 0 || lastAdjRate == null) {
       offset = 0;
     } else {
-      offset = lastAdjRate - firstRate;
+      offset = lastAdjRate - firstRateOrig;
     }
 
     const color =
@@ -552,6 +558,8 @@ function drawSessionChain() {
     sessionChainCtx.beginPath();
 
     hist.forEach((p, idx) => {
+      // ★ 連結グラフでは本来の rate をそのまま使い、
+      //    0〜100 にクリップ & オフセットだけかける
       let base = Math.max(0, Math.min(100, p.rate));
       let adjRate = base + offset;
       if (adjRate < 0) adjRate = 0;
@@ -561,7 +569,6 @@ function drawSessionChain() {
       const y = valueToY(adjRate, h, B, plotH);
 
       if (globalIndex === 0) {
-        // 全体の最初の点
         sessionChainCtx.moveTo(x, y);
       } else if (idx === 0) {
         // セッション切り替えの最初の点：
@@ -724,9 +731,6 @@ if (btnReset) {
     if (!ok) return;
 
     try {
-      // 現在セッションの最後の値
-      const last = history[history.length - 1];
-      const lastRate = last ? last.rate : 0;
       const currentColor = getCurrentColor();
 
       // 現在セッションを過去セッションに保存（先頭に追加）
@@ -747,8 +751,6 @@ if (btnReset) {
 
       // 新しいセッションの履歴をクリア
       history = [];
-      // 各セッションのグラフは 0 からスタートさせたいなら、
-      // ここで 0 の初期点を入れてもOK（今回は入れない）
 
       await fetchResults();
       alert("投票データをリセットしました。");
@@ -791,7 +793,7 @@ if (btnResetAll) {
 // ==== ログイン ====
 
 btnUnlock.addEventListener("click", unlock);
-pwInput.addEventListener("keydown", (e) => {
+pwInput.addEventListener("keydown", e => {
   if (e.key === "Enter") unlock();
 });
 
