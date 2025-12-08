@@ -4,7 +4,7 @@
 //   ・範囲は -100〜+100（マイナスも表示）
 //   ・Y軸の数値ラベルは表示しない
 // ● セッション1〜3連結グラフ
-//   ・0〜100% のプラス表示のみ
+//   ・0〜100% のプラス表示のみ（マイナスは0にクリップ）
 //   ・色はセッションごと（青→赤→緑）
 //   ・前セッションの終点と次セッションの始点が
 //     見た目上つながるようにオフセット補正
@@ -116,7 +116,7 @@ async function fetchResults() {
     numNotUnderstood.textContent = n;
     numTotal.textContent = total;
 
-    // 表示用理解率（普通の％）
+    // 表示用理解率（普通の％）: 0〜100
     const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
     rateUnderstood.textContent = rateDisplay + "%";
 
@@ -131,8 +131,8 @@ async function fetchResults() {
         rate = null; // まだ何も描かない
       } else {
         rate = ((u - n) / maxP) * 100;
-        if (rate < -100) rate = -100;
-        if (rate > 100) rate = 100;
+        // -100〜+100 にクリップ（丸めない）
+        rate = Math.max(-100, Math.min(100, rate));
       }
     } else {
       // 想定人数が未設定 → グラフは描かない
@@ -393,6 +393,7 @@ function drawPrevSessions() {
 // ==== セッション1〜3 連結グラフ ====
 // セッション1→2→3 を 1 本の線のように見せる。
 // 値は 0〜100% にクリップし、色は各セッション色。
+// Y軸の数値ラベルは表示しない（補助線のみ）。
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
@@ -447,30 +448,21 @@ function drawSessionChain() {
   sessionChainCtx.lineTo(w - R, h - B);
   sessionChainCtx.stroke();
 
-  // Y軸（0〜100）
+  // Y軸（0〜100）※数値ラベルなし・補助線のみ
   const yTicks = [0, 25, 50, 75, 100];
-  sessionChainCtx.font = "10px sans-serif";
-  sessionChainCtx.textAlign = "right";
-  sessionChainCtx.textBaseline = "middle";
-
   yTicks.forEach(v => {
     const y = valueToY(v, h, B, plotH);
 
-    if (v === 0) {
-      sessionChainCtx.strokeStyle = "#FFFFFF";
-      sessionChainCtx.lineWidth = 1.5;
-      sessionChainCtx.setLineDash([]);
-    } else {
-      sessionChainCtx.strokeStyle = "#FFFFFF";
-      sessionChainCtx.lineWidth = 1;
-      sessionChainCtx.setLineDash([4, 4]);
-    }
+    sessionChainCtx.strokeStyle = "#FFFFFF";
+    sessionChainCtx.lineWidth = v === 0 ? 1.5 : 1;
+    sessionChainCtx.setLineDash(v === 0 ? [] : [4, 4]);
 
     sessionChainCtx.beginPath();
     sessionChainCtx.moveTo(L, y);
     sessionChainCtx.lineTo(w - R, y);
     sessionChainCtx.stroke();
   });
+  sessionChainCtx.setLineDash([]);
 
   // X補助線
   sessionChainCtx.strokeStyle = "#FFFFFF";
@@ -517,7 +509,7 @@ function drawSessionChain() {
     sessionChainCtx.beginPath();
 
     hist.forEach((p, idx) => {
-      let base = Math.max(0, Math.min(100, p.rate));
+      let base = Math.max(0, Math.min(100, p.rate)); // マイナスは0にクリップ
       let adjRate = base + offset;
       if (adjRate < 0) adjRate = 0;
       if (adjRate > 100) adjRate = 100;
@@ -528,7 +520,7 @@ function drawSessionChain() {
       if (globalIndex === 0) {
         sessionChainCtx.moveTo(x, y);
       } else if (idx === 0) {
-        // セッション切り替えの最初の点：
+        // セッション切り替えの最初の点：前の最後の点からそのままつなげる
         sessionChainCtx.moveTo(lastX, lastY);
         sessionChainCtx.lineTo(x, y);
       } else {
@@ -544,7 +536,7 @@ function drawSessionChain() {
     sessionChainCtx.stroke();
   });
 
-  // タイトル（簡単に）
+  // タイトル（テキストはそのまま残す）
   sessionChainCtx.font = "12px sans-serif";
   sessionChainCtx.fillStyle = "#FFFFFF";
   sessionChainCtx.textAlign = "left";
@@ -687,8 +679,6 @@ if (btnReset) {
     if (!ok) return;
 
     try {
-      // 現在セッションの最後の値
-      const last = history[history.length - 1];
       const currentColor = getCurrentColor();
 
       // 現在セッションを過去セッションに保存（先頭に追加）
