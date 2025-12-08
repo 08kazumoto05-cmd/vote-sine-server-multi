@@ -4,8 +4,8 @@
 //   想定人数が 0 のときはグラフ非表示
 // ● 過去セッションは最大3つ保存
 // ● セッション1〜3連結グラフ：
-//   セッション1 → 2 → 3 を 1 本の線に見せるため、
-//   2 以降のセッションは「前セッションの最終値」にピッタリつながるようにオフセット
+//   「一番古いセッション」→「……」→「いちばん新しいセッション（現在含む）」を
+//   1 本の線に見えるように連結する
 
 const ADMIN_PASSWORD = "admin123";
 
@@ -157,14 +157,17 @@ async function fetchResults() {
     // コメント
     renderComments(data.comments || []);
 
-    // 履歴更新
+    // 履歴更新（各セッションは必ず 0 から開始）
     addRatePoint(rate);
 
-    // 描画スタート
+    // メインのリアルタイムグラフ開始
     if (!animationStarted) {
       animationStarted = true;
       requestAnimationFrame(drawLineChart);
     }
+
+    // セッション連結グラフも更新
+    drawSessionChain();
 
     updateTimeLabel();
   } catch (e) {
@@ -418,7 +421,7 @@ function drawPrevSessions() {
 }
 
 // ==== セッション1〜3 連結グラフ ====
-// セッション1→2→3を1本の線に見せる
+// 「一番古いセッション」→「……」→「現在セッション」を 1 本の線で表示
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
@@ -430,27 +433,29 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#000000";
   sessionChainCtx.fillRect(0, 0, w, h);
 
-  const sessions = prevSessions.slice(0, 3);
-  if (sessions.length === 0) {
-    sessionChainCtx.fillStyle = "#CCCCCC";
-    sessionChainCtx.font = "14px sans-serif";
-    sessionChainCtx.textAlign = "center";
-    sessionChainCtx.textBaseline = "middle";
-    sessionChainCtx.fillText(
-      "まだセッションが保存されていません。",
-      w / 2,
-      h / 2
-    );
-    return;
-  }
+  // ------------------------------
+  // 1. セッションの順番を決める
+  //    ・prevSessions: [最新, 2番目, 3番目] なので
+  //      古い順 = reverse()
+  //    ・最後に「現在セッション（history）」も末尾に追加
+  //    ・その中から「末尾3つ」を使う
+  // ------------------------------
+  const list = [];
 
-  // 古い順（セッション1,2,3）に並べ替え
-  const ordered = sessions
+  // 古い順に並べた過去セッション
+  const oldOrdered = prevSessions
     .slice()
     .reverse()
     .filter((s) => s && s.points && s.points.length > 0);
 
-  if (ordered.length === 0) {
+  oldOrdered.forEach((s) => list.push({ type: "past", points: s.points }));
+
+  // 現在セッションも最後に追加
+  if (history && history.length > 0) {
+    list.push({ type: "current", points: history });
+  }
+
+  if (list.length === 0) {
     sessionChainCtx.fillStyle = "#CCCCCC";
     sessionChainCtx.font = "14px sans-serif";
     sessionChainCtx.textAlign = "center";
@@ -463,11 +468,17 @@ function drawSessionChain() {
     return;
   }
 
-  // 一本の配列に連結しつつ、前セッションの最後の値にピッタリつなげる
+  // 末尾3つだけを使う（セッション1〜3相当）
+  const sessions = list.slice(-3);
+
+  // ------------------------------
+  // 2. 一本の配列に連結しつつ、
+  //    「前セッションの最後の値」にピッタリつながるようオフセット
+  // ------------------------------
   let combined = [];
   let prevLastRate = null;
 
-  ordered.forEach((session) => {
+  sessions.forEach((session) => {
     const raw = session.points;
     if (!raw || raw.length === 0) return;
 
@@ -715,8 +726,7 @@ if (btnReset) {
     if (!ok) return;
 
     try {
-      // 現在セッションの最後の値
-      const last = history[history.length - 1];
+      // 現在セッションの色
       const currentColor = getCurrentColor();
 
       // 現在セッションを過去セッションに保存（先頭に追加）
@@ -737,7 +747,6 @@ if (btnReset) {
 
       // 新しいセッション：0 からスタート（前セッションとは連結しない）
       history = [];
-      // last の値は使用しない
 
       await fetchResults();
       alert("投票データをリセットしました。");
