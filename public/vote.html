@@ -4,32 +4,38 @@
   <meta charset="UTF-8" />
   <title>興味アンケート</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 既存の CSS ファイル名に合わせてください -->
+  <!-- 必要に応じて CSS のパスはそのまま -->
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="container">
     <h1>興味アンケート</h1>
     <p class="desc">
-      この内容や商品・サービスについて、
+      いまご覧いただいているサービスについて、<br />
       <strong>どのくらい興味があるか</strong> を教えてください。
     </p>
 
+    <!-- 投票ボタンエリア -->
     <div class="vote-box">
+      <!-- 「理解できた」 → 「興味がある」 -->
       <button id="btn-understood" class="btn understood">
         興味がある
       </button>
+
+      <!-- 「あまり理解できなかった」 → 「あまり興味がない」 -->
       <button id="btn-not-understood" class="btn not-understood">
         あまり興味がない
       </button>
-
-      <p id="message" class="message"></p>
-      <p class="small-note">
-        ※ 投票は匿名で集計されます。<br>
-        ※ 1人1回の回答を想定しています。
-      </p>
     </div>
 
+    <!-- メッセージ表示 -->
+    <p id="message" class="message"></p>
+    <p class="small-note">
+      ※ 投票は集計のみに利用されます。<br />
+      ※ お一人1回の回答を想定しています。
+    </p>
+
+    <!-- コメント入力 -->
     <div class="comment-input-box">
       <h2>ひとことコメント（任意）</h2>
       <p class="small-note">
@@ -38,7 +44,7 @@
       <textarea
         id="comment-input"
         rows="3"
-        placeholder="例）ここをもう少し詳しく知りたいです／特にこの部分に興味があります など"
+        placeholder="例）ここをもう少し詳しく知りたいです / 特にこの部分に興味があります など"
       ></textarea>
       <div style="margin-top: 8px; text-align: right;">
         <button id="btn-send-comment" class="btn reset">
@@ -51,6 +57,7 @@
     </div>
   </div>
 
+  <!-- クライアントJS はそのまま -->
   <script src="client.js"></script>
 </body>
 </html>
