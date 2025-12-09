@@ -1,7 +1,7 @@
 // =======================================
-// admin.js  最新版
+// admin.js  最新版（グラフ反映修正版）
 // =======================================
-
+//
 // ● 仕様
 // ・パスワード: cpa1968
 // ・現在 / 過去セッションのグラフ: 1点目は0として描画（0スタート）
@@ -12,6 +12,7 @@
 //    - x=0: 0%
 //    - x=1: セッション1の finalDisplayRate
 //    - x=2: セッション2の finalDisplayRate ... を折れ線で結ぶ
+// ・想定人数はサーバーの /api/results の maxParticipants を基準に使用
 
 const ADMIN_PASSWORD = "cpa1968";
 
@@ -28,7 +29,7 @@ const numTotal = document.getElementById("num-total");
 const rateUnderstood = document.getElementById("rate-understood");
 
 const canvas = document.getElementById("sineCanvas");
-const ctx = canvas.getContext("2d");
+const ctx = canvas ? canvas.getContext("2d") : null;
 
 const commentList = document.getElementById("comment-list");
 const timeIndicator = document.getElementById("time-indicator");
@@ -73,6 +74,9 @@ let history = [];      // 現在セッション [{ts, rate}]
 let prevSessions = []; // 過去セッション [{color, points, finalDisplayRate}]
 let resetCount = 0;
 
+// サーバーから取得した最新の想定人数（グラフ用はこれを使う）
+let currentMaxParticipants = 0;
+
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a"];
 
 let animationStarted = false;
@@ -100,7 +104,11 @@ async function fetchResults() {
     const u = data.understood || 0;
     const n = data.notUnderstood || 0;
     const total = u + n;
+
+    // サーバーが持っている想定人数をそのまま採用（グラフもこれ基準）
     const maxP = data.maxParticipants ?? 0;
+    currentMaxParticipants = maxP;
+
     const theme = data.theme || "";
 
     // 票数
@@ -128,9 +136,9 @@ async function fetchResults() {
       rate = null;
     }
 
-    // 想定人数 UI
-    if (document.activeElement !== maxInput) {
-      maxInput.value = maxP;
+    // 想定人数 UI（サーバー値を常に反映）
+    if (maxInput) {
+      maxInput.value = maxP; // ← 常に同期させる
     }
     if (maxP > 0) {
       maxInfo.textContent = `想定人数：${maxP}人中、${total}人が投票済み`;
@@ -155,7 +163,9 @@ async function fetchResults() {
     // 描画開始
     if (!animationStarted) {
       animationStarted = true;
-      requestAnimationFrame(drawLineChart);
+      if (canvas && ctx) {
+        requestAnimationFrame(drawLineChart);
+      }
     }
 
     updateTimeLabel();
@@ -178,13 +188,15 @@ function addRatePoint(rate) {
 
 // ========== 現在セッションのグラフ ==========
 function drawLineChart() {
+  if (!canvas || !ctx) return;
+
   const w = canvas.width;
   const h = canvas.height;
 
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, w, h);
 
-  const maxP = Number(maxInput.value || "0");
+  const maxP = currentMaxParticipants; // ← サーバー値を使用
 
   if (maxP <= 0) {
     ctx.fillStyle = "#ccc";
@@ -378,8 +390,8 @@ function drawPrevSessions() {
     pctx.strokeStyle = "#ffffff";
     pctx.lineWidth = 1;
     pctx.setLineDash([4, 4]);
-    [0.25, 0.5, 0.75].forEach(r => {
-      const x = L + plotW * r;
+    [0.25, 0.5, 0.75].forEach(ratio => {
+      const x = L + plotW * ratio;
       pctx.beginPath();
       pctx.moveTo(x, T);
       pctx.lineTo(x, h - B);
@@ -498,8 +510,6 @@ function drawSessionChain() {
 
   sessionChainCtx.lineWidth = 2.5;
   sessionChainCtx.setLineDash([]);
-
-  // 1本の線で描画（色はセッション1の色で統一。必要ならセッションごとに変えてもOK）
   sessionChainCtx.strokeStyle = SESSION_COLORS[0];
   sessionChainCtx.beginPath();
 
@@ -612,8 +622,9 @@ if (btnSaveMax && maxInput) {
       if (!res.ok) throw new Error("failed to update max participants");
 
       const data = await res.json();
+      currentMaxParticipants = data.maxParticipants ?? num;
       maxInfo.textContent =
-        `想定人数：${data.maxParticipants}人中、` +
+        `想定人数：${currentMaxParticipants}人中、` +
         `${numTotal.textContent}人が投票済み`;
       alert("想定投票人数を保存しました。");
     } catch (e) {
@@ -665,7 +676,7 @@ if (btnReset) {
       // 現在の「理解率」カードの値を finalDisplayRate として取得
       let finalDisplayRate = 0;
       try {
-        const txt = rateUnderstood.textContent.replace("%", "");
+        const txt = (rateUnderstood.textContent || "").replace("%", "");
         finalDisplayRate = Number(txt) || 0;
       } catch {
         finalDisplayRate = 0;
@@ -718,6 +729,7 @@ if (btnResetAll) {
       history = [];
       prevSessions = [];
       resetCount = 0;
+      currentMaxParticipants = 0;
 
       drawPrevSessions();
       drawSessionChain();
@@ -750,7 +762,7 @@ function unlock() {
   fetchResults();
   setInterval(fetchResults, 1000);
 
-  if (!animationStarted) {
+  if (!animationStarted && canvas && ctx) {
     animationStarted = true;
     requestAnimationFrame(drawLineChart);
   }
