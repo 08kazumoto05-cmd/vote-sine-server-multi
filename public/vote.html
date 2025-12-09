@@ -4,18 +4,26 @@
   <meta charset="UTF-8" />
   <title>興味アンケート</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 必要に応じて CSS のパスはそのまま -->
-  <link rel="stylesheet" href="style.css" />
+  <!-- ★ ファイル名を vote.css に -->
+  <link rel="stylesheet" href="vote.css" />
 </head>
-<body>
+<body class="vote-body">
   <div class="container">
-    <h1>興味アンケート</h1>
-    <p class="desc">
-      いまご覧いただいているサービスについて、<br />
-      <strong>どのくらい興味があるか</strong> を教えてください。
+    <!-- タイトル -->
+    <h1 class="page-title">興味アンケート</h1>
+
+    <!-- テーマ（必要なければ文言だけ使ってOK） -->
+    <p class="theme-title" id="theme-title">
+      今回の内容について、どのくらい興味があるか教えてください。
     </p>
 
-    <!-- 投票ボタンエリア -->
+    <!-- 説明 -->
+    <p class="desc">
+      このサービス・講義・商品について、<br />
+      <strong>あなたの興味の度合い</strong> を教えてください。
+    </p>
+
+    <!-- 投票ボタン -->
     <div class="vote-box">
       <!-- 「理解できた」 → 「興味がある」 -->
       <button id="btn-understood" class="btn understood">
@@ -31,33 +39,34 @@
     <!-- メッセージ表示 -->
     <p id="message" class="message"></p>
     <p class="small-note">
-      ※ 投票は集計のみに利用されます。<br />
-      ※ お一人1回の回答を想定しています。
+      ※ 投票は集計のみに利用されます。お一人1回の回答を想定しています。
     </p>
 
     <!-- コメント入力 -->
     <div class="comment-input-box">
-      <h2>ひとことコメント（任意）</h2>
+      <h2 class="comment-title">ひとことコメント（任意）</h2>
       <p class="small-note">
-        気になったこと・もっと知りたい点・良かった点などがあれば、自由にお書きください。
+        気になった点・もっと知りたい点・良かった点などがあれば、自由にお書きください。
       </p>
       <textarea
         id="comment-input"
         rows="3"
         placeholder="例）ここをもう少し詳しく知りたいです / 特にこの部分に興味があります など"
       ></textarea>
-      <div style="margin-top: 8px; text-align: right;">
-        <button id="btn-send-comment" class="btn reset">
+
+      <div class="comment-button-row">
+        <button id="btn-send-comment" class="btn ghost">
           コメントのみ送信
         </button>
       </div>
+
       <p class="note-anon">
-        ※ コメントも匿名で送信されます。個人が特定される情報は書かないようご注意ください。
+        ※ コメントも匿名で送信されます。個人が特定される情報は書かないようお願いいたします。
       </p>
     </div>
   </div>
 
-  <!-- クライアントJS はそのまま -->
+  <!-- JS はそのまま -->
   <script src="client.js"></script>
 </body>
 </html>
