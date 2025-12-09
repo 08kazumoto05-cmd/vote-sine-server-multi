@@ -389,6 +389,9 @@ function drawPrevSessions() {
 // ・前セッションの終点と次のセッション開始が “完全にズレなく結合”
 // =====================================
 
+// =====================================
+// ★ 連結グラフ（セッション最終理解度のみを頂点として表示）
+// =====================================
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
@@ -398,7 +401,7 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#000";
   sessionChainCtx.fillRect(0, 0, w, h);
 
-  // 最新→古い順 → 古い順に並べ替え
+  // 過去セッション（最新→古い）→ 古い順に並べ直す
   const sessionsNewest = prevSessions.slice(0, 3);
   const sessions = sessionsNewest
     .slice()
@@ -414,13 +417,13 @@ function drawSessionChain() {
     return;
   }
 
-  const totalPoints = sessions.reduce(
-    (sum, s) => sum + (s.points ? s.points.length : 0),
-    0
-  );
-  if (totalPoints < 2) return;
+  // ---- 3つの「最終理解度」を取り出す ----
+  const finalRates = sessions.map(s => {
+    const last = s.points[s.points.length - 1];
+    return Math.max(0, Math.min(100, last.rate));
+  });
 
-  // 大きな余白（太軸向け）
+  // ---- 大きな余白（太軸向け） ----
   const L = 120, R = 80, T = 120, B = 150;
   const plotW = w - L - R;
   const plotH = h - T - B;
@@ -458,78 +461,60 @@ function drawSessionChain() {
     sessionChainCtx.fillText(v + "%", L - 20, y);
   });
 
-  // ---- X補助線 ----
-  sessionChainCtx.strokeStyle = "#666";
-  sessionChainCtx.lineWidth = 3;
-  sessionChainCtx.setLineDash([20, 20]);
-  [0.25, 0.5, 0.75].forEach(r => {
-    const x = L + plotW * r;
-    sessionChainCtx.beginPath();
-    sessionChainCtx.moveTo(x, T);
-    sessionChainCtx.lineTo(x, h - B);
-    sessionChainCtx.stroke();
-  });
-  sessionChainCtx.setLineDash([]);
+  // ---- セッション数ぶん均等配置 ----
+  const count = finalRates.length;
+  const stepX = count > 1 ? plotW / (count - 1) : 0;
 
-  // ---- 線描画 ----
-  const stepX = totalPoints > 1 ? plotW / (totalPoints - 1) : 0;
-  let globalIndex = 0;
-  let lastAdjRate = null;
-  let lastX = null;
-  let lastY = null;
+  // ---- 折れ線として描画 ----
+  sessionChainCtx.lineWidth = 8;
 
-  sessions.forEach((session, idxS) => {
-    const hist = session.points;
-    if (!hist || hist.length === 0) return;
+  sessions.forEach((session, idx) => {
+    const rate = finalRates[idx];
+    const x = L + idx * stepX;
+    const y = valueToY(rate, h, B, plotH);
 
-    const firstRateOrig = Math.max(0, Math.min(100, hist[0].rate));
-
-    // ★ 前のセッション最終点とピッタリつなぐ補正値
-    let offset = 0;
-    if (idxS > 0 && lastAdjRate != null) {
-      offset = lastAdjRate - firstRateOrig;
-    }
-
-    const color = session.color || SESSION_COLORS[idxS];
+    const color =
+      session.color ||
+      SESSION_COLORS[Math.min(idx, SESSION_COLORS.length - 1)];
 
     sessionChainCtx.strokeStyle = color;
-    sessionChainCtx.lineWidth = 6;
+
+    if (idx === 0) {
+      sessionChainCtx.beginPath();
+      sessionChainCtx.moveTo(x, y);
+    } else {
+      sessionChainCtx.lineTo(x, y);
+    }
+  });
+
+  sessionChainCtx.stroke();
+
+  // ---- 各セッションの点を大きく描画 ----
+  sessions.forEach((session, idx) => {
+    const rate = finalRates[idx];
+    const x = L + idx * stepX;
+    const y = valueToY(rate, h, B, plotH);
+
+    const color =
+      session.color ||
+      SESSION_COLORS[Math.min(idx, SESSION_COLORS.length - 1)];
+
+    sessionChainCtx.fillStyle = color;
     sessionChainCtx.beginPath();
-
-    hist.forEach((p, idx) => {
-      let base = Math.max(0, Math.min(100, p.rate));
-      let adj = base + offset;
-      if (adj < 0) adj = 0;
-      if (adj > 100) adj = 100;
-
-      const x = L + globalIndex * stepX;
-      const y = valueToY(adj, h, B, plotH);
-
-      if (globalIndex === 0) {
-        sessionChainCtx.moveTo(x, y);
-      } else if (idx === 0) {
-        // ★ 前の点と完全に接続
-        sessionChainCtx.moveTo(lastX, lastY);
-        sessionChainCtx.lineTo(x, y);
-      } else {
-        sessionChainCtx.lineTo(x, y);
-      }
-
-      lastAdjRate = adj;
-      lastX = x;
-      lastY = y;
-      globalIndex++;
-    });
-
-    sessionChainCtx.stroke();
+    sessionChainCtx.arc(x, y, 16, 0, Math.PI * 2);
+    sessionChainCtx.fill();
   });
 
   // ---- タイトル ----
   sessionChainCtx.font = "40px sans-serif";
   sessionChainCtx.fillStyle = "#FFF";
-  sessionChainCtx.fillText("セッション1→2→3 連結グラフ（太線 / 大フォント）", L, 60);
+  sessionChainCtx.textAlign = "left";
+  sessionChainCtx.fillText(
+    "セッション別 最終理解度 推移（各セッション1点のみ）",
+    L,
+    80
+  );
 }
-
 
 // ========================================================
 // コメント表示
