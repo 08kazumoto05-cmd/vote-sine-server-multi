@@ -1,13 +1,19 @@
 // ===============================
-// admin.js（大文字・太線・大キャンバス対応版）
+// admin.js（パスワード cpa1968 / 太線・大文字版）
 // ===============================
-
-// ● 全体改善ポイント
-// ・軸フォント大型化（26〜30px）
-// ・線の太さを統一して極太(6px)
-// ・キャンバス高さ 1200px に最適化
-// ・目盛り線も太く明確に
-// ・セッション0スタート / 色A / 連結仕様 / 保存仕様はそのまま維持
+//
+// ● 現在セッション & 過去セッションのグラフ
+//   ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
+//   ・範囲は 0〜100（マイナスは 0 にクリップ）
+//   ・各セッションのグラフは「必ず 0 からスタート」して見せる
+// ● 過去セッション
+//   ・history（rate推移）に加えて
+//     「リセット時の理解率（理解できた ÷ 合計）」を finalDisplayRate として保存
+// ● 連結グラフ
+//   ・各セッション 1 点のみ（finalDisplayRate）をプロット
+//   ・セッション1→2→3 を折れ線でつなぐ
+// ● パスワード
+//   ・ADMIN_PASSWORD = "cpa1968"
 
 const ADMIN_PASSWORD = "cpa1968";
 
@@ -43,7 +49,7 @@ const themeInput = document.getElementById("theme-input");
 const btnSaveTheme = document.getElementById("btn-save-theme");
 const themeInfo = document.getElementById("theme-info");
 
-// 過去3セッション
+// 過去3セッション用キャンバス
 const prevCanvases = [
   document.getElementById("prevChart1"),
   document.getElementById("prevChart2"),
@@ -59,20 +65,27 @@ const prevRateLabels = [
   document.getElementById("prevChart-rate2"),
   document.getElementById("prevChart-rate3")
 ];
+const prevCtxs = prevCanvases.map(c => (c ? c.getContext("2d") : null));
 
-const prevCtxs = prevCanvases.map(c => c ? c.getContext("2d") : null);
-
-// 連結グラフ
+// セッション1〜3連結グラフ用キャンバス
 const sessionChainCanvas = document.getElementById("sessionChain");
-const sessionChainCtx = sessionChainCanvas ? sessionChainCanvas.getContext("2d") : null;
-
+const sessionChainCtx = sessionChainCanvas
+  ? sessionChainCanvas.getContext("2d")
+  : null;
 
 // ===============================
 // 状態管理
 // ===============================
 
-let history = []; // 現在セッション
-let prevSessions = []; // 過去3件
+// 現在セッションの履歴 [{ ts, rate }]
+let history = [];
+
+// 過去セッション（最大3件）
+// 先頭: 一番新しいセッション
+// { color: "#xxxxxx", points: [{ts, rate}, ...], finalDisplayRate: number }
+let prevSessions = [];
+
+// リセット回数（0:初回, 1:1回目リセット後, 2:2回目…）
 let resetCount = 0;
 
 // セッション色（Aの指定）
@@ -81,64 +94,80 @@ const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a"];
 // 描画ループフラグ
 let animationStarted = false;
 
-
 // ===============================
 // ユーティリティ
 // ===============================
 
+// 現在セッションの色
 function getCurrentColor() {
-  return SESSION_COLORS[Math.min(resetCount, SESSION_COLORS.length - 1)];
+  const idx = Math.min(resetCount, SESSION_COLORS.length - 1);
+  return SESSION_COLORS[idx];
 }
 
-// 値を Y 座標へ（太線用に幅を大きめに計算）
+// 0〜100 の値をキャンバスY座標に変換（0:下端, 100:上端）
 function valueToY(value, canvasHeight, bottomPadding, plotHeight) {
-  let v = Math.max(0, Math.min(100, value));
-  const ratio = v / 100;
+  let v = Math.max(0, Math.min(100, value)); // 0〜100 にクリップ
+  const ratio = v / 100; // 0〜1
   return canvasHeight - bottomPadding - ratio * plotHeight;
 }
+
 // ===============================
-// 結果取得（サーバーから毎秒）
+// 結果取得（サーバーから）
 // ===============================
+
 async function fetchResults() {
   try {
     const res = await fetch("/api/results");
     if (!res.ok) throw new Error("failed to fetch results");
 
     const data = await res.json();
+
     const u = data.understood || 0;
     const n = data.notUnderstood || 0;
     const total = u + n;
     const maxP = data.maxParticipants ?? 0;
     const theme = data.theme || "";
 
+    // 票数表示
     numUnderstood.textContent = u;
     numNotUnderstood.textContent = n;
     numTotal.textContent = total;
 
+    // 表示用理解率（普通の％）= understood / total
     const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
     rateUnderstood.textContent = rateDisplay + "%";
 
+    // --- グラフ用の値（0〜100） ---
+    // (理解 − 不理解) / maxP * 100 を使用
     let rate = null;
+
     if (maxP > 0) {
       if (total === 0 && history.length > 0) {
+        // 投票が 0 でも履歴があるときは前回値を維持
         rate = history[history.length - 1].rate;
       } else if (total === 0 && history.length === 0) {
-        rate = null;
+        rate = null; // まだ何も描かない
       } else {
         rate = ((u - n) / maxP) * 100;
         if (rate < 0) rate = 0;
         if (rate > 100) rate = 100;
       }
+    } else {
+      // 想定人数が未設定 → グラフは描かない
+      rate = null;
     }
 
+    // 想定人数 UI
     if (document.activeElement !== maxInput) {
       maxInput.value = maxP;
     }
-    maxInfo.textContent =
-      maxP > 0
-        ? `想定人数：${maxP}人中、${total}人が投票済み`
-        : "想定人数が未設定です（グラフは表示されません）";
+    if (maxP > 0) {
+      maxInfo.textContent = `想定人数：${maxP}人中、${total}人が投票済み`;
+    } else {
+      maxInfo.textContent = "想定人数が未設定です（グラフは表示されません）";
+    }
 
+    // テーマ UI
     themeInfo.textContent = theme
       ? `現在のテーマ：${theme}`
       : "現在のテーマ：未設定";
@@ -146,9 +175,13 @@ async function fetchResults() {
       themeInput.value = theme;
     }
 
+    // コメント
     renderComments(data.comments || []);
+
+    // 履歴更新
     addRatePoint(rate);
 
+    // 描画スタート
     if (!animationStarted) {
       animationStarted = true;
       requestAnimationFrame(drawLineChart);
@@ -161,14 +194,15 @@ async function fetchResults() {
 }
 
 // ===============================
-// 履歴追加
+// 履歴管理
 // ===============================
+
 function addRatePoint(rate) {
-  if (rate === null) return;
   const now = Date.now();
+  if (rate === null) return;
 
   const last = history[history.length - 1];
-  if (last && last.rate === rate) return;
+  if (last && last.rate === rate) return; // 同じ値は追加しない
 
   history.push({ ts: now, rate });
 
@@ -179,30 +213,31 @@ function addRatePoint(rate) {
 
 // ===============================
 // 現在セッションのグラフ描画
-// ★ 線太め（6px）・フォント大きめ（26px）
-// ★ キャンバスは 1200px 高さ想定
+// （0スタート演出 / 太線・大フォント）
 // ===============================
+
 function drawLineChart() {
   const w = canvas.width;
   const h = canvas.height;
 
-  ctx.fillStyle = "#000";
+  // 背景
+  ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
 
   const maxP = Number(maxInput.value || "0");
 
   if (maxP <= 0) {
-    ctx.fillStyle = "#ccc";
+    ctx.fillStyle = "#CCCCCC";
     ctx.font = "32px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("想定人数が未設定です。", w / 2, h / 2);
+    ctx.fillText("想定人数が未設定のため、グラフは表示されません。", w / 2, h / 2);
     requestAnimationFrame(drawLineChart);
     return;
   }
 
   if (history.length === 0) {
-    ctx.fillStyle = "#ccc";
+    ctx.fillStyle = "#CCCCCC";
     ctx.font = "32px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -216,15 +251,16 @@ function drawLineChart() {
   const plotH = h - T - B;
 
   // 外枠
-  ctx.strokeStyle = "#FFF";
+  ctx.strokeStyle = "#FFFFFF";
   ctx.lineWidth = 4;
+  ctx.setLineDash([]);
   ctx.beginPath();
   ctx.moveTo(L, T);
   ctx.lineTo(L, h - B);
   ctx.lineTo(w - R, h - B);
   ctx.stroke();
 
-  // 目盛り
+  // Y軸目盛（0,25,50,75,100）
   const yTicks = [0, 25, 50, 75, 100];
   ctx.font = "28px sans-serif";
   ctx.textAlign = "right";
@@ -233,7 +269,7 @@ function drawLineChart() {
   yTicks.forEach(v => {
     const y = valueToY(v, h, B, plotH);
 
-    ctx.strokeStyle = v === 0 ? "#FFF" : "#666";
+    ctx.strokeStyle = v === 0 ? "#FFFFFF" : "#666666";
     ctx.lineWidth = v === 0 ? 4 : 2;
     ctx.setLineDash(v === 0 ? [] : [10, 10]);
 
@@ -243,40 +279,63 @@ function drawLineChart() {
     ctx.stroke();
 
     ctx.setLineDash([]);
-    ctx.fillStyle = "#FFF";
+    ctx.fillStyle = "#FFFFFF";
     ctx.fillText(v + "%", L - 10, y);
   });
 
+  // X方向補助線
+  ctx.strokeStyle = "#666666";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 10]);
+  [0.25, 0.5, 0.75].forEach(ratio => {
+    const x = L + plotW * ratio;
+    ctx.beginPath();
+    ctx.moveTo(x, T);
+    ctx.lineTo(x, h - B);
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
+
+  // X座標
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
 
-  ctx.strokeStyle = getCurrentColor();
+  // 線色
+  const currentColor = getCurrentColor();
+
+  ctx.strokeStyle = currentColor;
   ctx.lineWidth = 6;
   ctx.setLineDash([]);
   ctx.beginPath();
 
   history.forEach((p, i) => {
-    const disp = i === 0 ? 0 : p.rate;
+    // 1点目だけは 0 として描画（0スタート演出）
+    const displayRate = i === 0 ? 0 : p.rate;
     const x = L + i * stepX;
-    const y = valueToY(disp, h, B, plotH);
+    const y = valueToY(displayRate, h, B, plotH);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
-
   ctx.stroke();
 
+  // タイトル
   ctx.font = "32px sans-serif";
-  ctx.fillStyle = "#FFF";
+  ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "left";
-  ctx.fillText("現在セッション理解度推移（0〜100%）", L, T - 30);
+  ctx.textBaseline = "top";
+  ctx.fillText(
+    "現在セッション理解度推移（0〜100％）",
+    L,
+    8
+  );
 
   requestAnimationFrame(drawLineChart);
 }
+
 // ===============================
-// 過去セッションのグラフ描画（大サイズ版）
-// ★ キャンバスは 1000×200 → 実表示 2倍（CSS拡大前提）
-// ★ 線太め 5px、フォント28px
-// ★ 1点目は 0スタート
-// ★ 右側に最終理解度％を表示
+// 過去セッションのグラフ描画
+// ・各セッション 1 点目は 0 として描画（0スタート）
+// ・右横に「最終理解度：◯◯％」を表示
+//  ※最終理解度は「リセット時の理解率（理解できた ÷ 合計）」
 // ===============================
 
 function drawPrevSessions() {
@@ -292,40 +351,59 @@ function drawPrevSessions() {
     const w = c.width;
     const h = c.height;
 
-    pctx.fillStyle = "#000";
+    // 背景
+    pctx.fillStyle = "#000000";
     pctx.fillRect(0, 0, w, h);
 
     if (!session || !session.points || session.points.length === 0) {
-      const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : "3つ前";
-      note.textContent = `${label}のセッション：まだグラフはありません。`;
-      rateLabel.textContent = "";
+      if (note) {
+        const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : "3つ前";
+        note.textContent = `${label}のセッション：まだグラフはありません。`;
+      }
+      if (rateLabel) {
+        rateLabel.textContent = "";
+      }
       continue;
     }
 
     const hist = session.points;
     const color = session.color;
 
-    const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : "3つ前";
-    note.textContent = `${label}のセッション：理解度推移`;
+    if (note) {
+      const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : "3つ前";
+      note.textContent = `${label}のセッション：理解度の推移（0〜100％）`;
+    }
 
-    // 最終理解度表示
-    const lastRate = Math.max(0, Math.min(100, hist[hist.length - 1].rate));
-    rateLabel.textContent = `（最終理解度：${Math.round(lastRate)}%）`;
+    // ★ 最終理解度％を表示
+    let finalRate;
+    if (typeof session.finalDisplayRate === "number") {
+      finalRate = Math.max(0, Math.min(100, session.finalDisplayRate));
+    } else {
+      // 古いデータで finalDisplayRate が無い場合は最後の rate を使用
+      const lastPoint = hist[hist.length - 1];
+      let lastRate = lastPoint ? lastPoint.rate : 0;
+      finalRate = Math.max(0, Math.min(100, lastRate));
+    }
+
+    if (rateLabel) {
+      rateLabel.textContent = `（最終理解度：${Math.round(finalRate)}%）`;
+    }
 
     const L = 60, R = 40, T = 40, B = 60;
     const plotW = w - L - R;
     const plotH = h - T - B;
 
     // 外枠
-    pctx.strokeStyle = "#FFF";
+    pctx.strokeStyle = "#FFFFFF";
     pctx.lineWidth = 4;
+    pctx.setLineDash([]);
     pctx.beginPath();
     pctx.moveTo(L, T);
     pctx.lineTo(L, h - B);
     pctx.lineTo(w - R, h - B);
     pctx.stroke();
 
-    // Y軸目盛（0〜100）
+    // Y軸（0〜100）
     const yTicks = [0, 25, 50, 75, 100];
     pctx.font = "26px sans-serif";
     pctx.textAlign = "right";
@@ -334,7 +412,7 @@ function drawPrevSessions() {
     yTicks.forEach(v => {
       const y = valueToY(v, h, B, plotH);
 
-      pctx.strokeStyle = v === 0 ? "#FFF" : "#666";
+      pctx.strokeStyle = v === 0 ? "#FFFFFF" : "#666666";
       pctx.lineWidth = v === 0 ? 4 : 2;
       pctx.setLineDash(v === 0 ? [] : [10, 10]);
 
@@ -344,16 +422,16 @@ function drawPrevSessions() {
       pctx.stroke();
 
       pctx.setLineDash([]);
-      pctx.fillStyle = "#FFF";
+      pctx.fillStyle = "#FFFFFF";
       pctx.fillText(v + "%", L - 10, y);
     });
 
     // X補助線
-    pctx.strokeStyle = "#666";
+    pctx.strokeStyle = "#666666";
     pctx.lineWidth = 2;
     pctx.setLineDash([10, 10]);
-    [0.25, 0.5, 0.75].forEach(r => {
-      const x = L + plotW * r;
+    [0.25, 0.5, 0.75].forEach(ratio => {
+      const x = L + plotW * ratio;
       pctx.beginPath();
       pctx.moveTo(x, T);
       pctx.lineTo(x, h - B);
@@ -361,47 +439,41 @@ function drawPrevSessions() {
     });
     pctx.setLineDash([]);
 
-    // 線の描画（太線 5px）
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
 
-    pctx.strokeStyle = color;
+    // セッションごとの色で線を描画（1点目は0）
+    pctx.strokeStyle = color || "#4fc3f7";
     pctx.lineWidth = 5;
+    pctx.setLineDash([]);
     pctx.beginPath();
 
     hist.forEach((p, idx) => {
-      const disp = idx === 0 ? 0 : p.rate;
-      let clipped = Math.max(0, Math.min(100, disp));
+      const displayRate = idx === 0 ? 0 : p.rate;
       const x = L + idx * stepX;
-      const y = valueToY(clipped, h, B, plotH);
-
+      const y = valueToY(displayRate, h, B, plotH);
       if (idx === 0) pctx.moveTo(x, y);
       else pctx.lineTo(x, y);
     });
-
     pctx.stroke();
   }
 }
-// =====================================
-// セッション1〜3 連結グラフ（巨大版）
-// ・キャンバス 1800×1200 を想定
-// ・線：太め 6px
-// ・フォント：30px
-// ・前セッションの終点と次のセッション開始が “完全にズレなく結合”
-// =====================================
 
-// =====================================
-// ★ 連結グラフ（セッション最終理解度のみを頂点として表示）
-// =====================================
+// ===============================
+// セッション1〜3 連結グラフ
+// ・各セッションの「最終理解度(finalDisplayRate)」を1点として表示
+// ・セッション1→2→3を太線で結ぶ
+// ===============================
+
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
   const w = sessionChainCanvas.width;
   const h = sessionChainCanvas.height;
 
-  sessionChainCtx.fillStyle = "#000";
+  sessionChainCtx.fillStyle = "#000000";
   sessionChainCtx.fillRect(0, 0, w, h);
 
-  // 過去セッション（最新→古い）→ 古い順に並べ直す
+  // 最新→古い順 → 古い順に並べ替え
   const sessionsNewest = prevSessions.slice(0, 3);
   const sessions = sessionsNewest
     .slice()
@@ -409,7 +481,7 @@ function drawSessionChain() {
     .filter(s => s && s.points && s.points.length > 0);
 
   if (sessions.length === 0) {
-    sessionChainCtx.fillStyle = "#CCC";
+    sessionChainCtx.fillStyle = "#CCCCCC";
     sessionChainCtx.font = "40px sans-serif";
     sessionChainCtx.textAlign = "center";
     sessionChainCtx.textBaseline = "middle";
@@ -417,19 +489,22 @@ function drawSessionChain() {
     return;
   }
 
-  // ---- 3つの「最終理解度」を取り出す ----
+  // 各セッションの最終理解度（リセット時の理解率）を取得
   const finalRates = sessions.map(s => {
+    if (typeof s.finalDisplayRate === "number") {
+      return Math.max(0, Math.min(100, s.finalDisplayRate));
+    }
     const last = s.points[s.points.length - 1];
-    return Math.max(0, Math.min(100, last.rate));
+    const base = last ? last.rate : 0;
+    return Math.max(0, Math.min(100, base));
   });
 
-  // ---- 大きな余白（太軸向け） ----
   const L = 120, R = 80, T = 120, B = 150;
   const plotW = w - L - R;
   const plotH = h - T - B;
 
-  // ---- 外枠 ----
-  sessionChainCtx.strokeStyle = "#FFF";
+  // 外枠
+  sessionChainCtx.strokeStyle = "#FFFFFF";
   sessionChainCtx.lineWidth = 6;
   sessionChainCtx.setLineDash([]);
   sessionChainCtx.beginPath();
@@ -438,7 +513,7 @@ function drawSessionChain() {
   sessionChainCtx.lineTo(w - R, h - B);
   sessionChainCtx.stroke();
 
-  // ---- Y軸 ----
+  // Y軸
   const yTicks = [0, 25, 50, 75, 100];
   sessionChainCtx.font = "30px sans-serif";
   sessionChainCtx.textAlign = "right";
@@ -447,7 +522,7 @@ function drawSessionChain() {
   yTicks.forEach(v => {
     const y = valueToY(v, h, B, plotH);
 
-    sessionChainCtx.strokeStyle = v === 0 ? "#FFF" : "#666";
+    sessionChainCtx.strokeStyle = v === 0 ? "#FFFFFF" : "#666666";
     sessionChainCtx.lineWidth = v === 0 ? 6 : 3;
     sessionChainCtx.setLineDash(v === 0 ? [] : [20, 20]);
 
@@ -457,22 +532,34 @@ function drawSessionChain() {
     sessionChainCtx.stroke();
 
     sessionChainCtx.setLineDash([]);
-    sessionChainCtx.fillStyle = "#FFF";
+    sessionChainCtx.fillStyle = "#FFFFFF";
     sessionChainCtx.fillText(v + "%", L - 20, y);
   });
 
-  // ---- セッション数ぶん均等配置 ----
+  // X補助線
+  sessionChainCtx.strokeStyle = "#666666";
+  sessionChainCtx.lineWidth = 3;
+  sessionChainCtx.setLineDash([20, 20]);
+  [0.25, 0.5, 0.75].forEach(r => {
+    const x = L + plotW * r;
+    sessionChainCtx.beginPath();
+    sessionChainCtx.moveTo(x, T);
+    sessionChainCtx.lineTo(x, h - B);
+    sessionChainCtx.stroke();
+  });
+  sessionChainCtx.setLineDash([]);
+
+  // セッション数ぶん均等配置
   const count = finalRates.length;
   const stepX = count > 1 ? plotW / (count - 1) : 0;
 
-  // ---- 折れ線として描画 ----
+  // 折れ線として描画
   sessionChainCtx.lineWidth = 8;
 
   sessions.forEach((session, idx) => {
     const rate = finalRates[idx];
     const x = L + idx * stepX;
     const y = valueToY(rate, h, B, plotH);
-
     const color =
       session.color ||
       SESSION_COLORS[Math.min(idx, SESSION_COLORS.length - 1)];
@@ -489,36 +576,44 @@ function drawSessionChain() {
 
   sessionChainCtx.stroke();
 
-  // ---- 各セッションの点を大きく描画 ----
+  // 各セッションの点を大きく描画 & ラベル（セッション番号）
   sessions.forEach((session, idx) => {
     const rate = finalRates[idx];
     const x = L + idx * stepX;
     const y = valueToY(rate, h, B, plotH);
-
     const color =
       session.color ||
       SESSION_COLORS[Math.min(idx, SESSION_COLORS.length - 1)];
 
+    // 点
     sessionChainCtx.fillStyle = color;
     sessionChainCtx.beginPath();
     sessionChainCtx.arc(x, y, 16, 0, Math.PI * 2);
     sessionChainCtx.fill();
+
+    // 数値ラベル
+    sessionChainCtx.font = "28px sans-serif";
+    sessionChainCtx.fillStyle = "#FFFFFF";
+    sessionChainCtx.textAlign = "center";
+    sessionChainCtx.textBaseline = "bottom";
+    sessionChainCtx.fillText(`${Math.round(rate)}%`, x, y - 20);
   });
 
-  // ---- タイトル ----
+  // タイトル
   sessionChainCtx.font = "40px sans-serif";
-  sessionChainCtx.fillStyle = "#FFF";
+  sessionChainCtx.fillStyle = "#FFFFFF";
   sessionChainCtx.textAlign = "left";
+  sessionChainCtx.textBaseline = "top";
   sessionChainCtx.fillText(
-    "セッション別 最終理解度 推移（各セッション1点のみ）",
+    "セッション別 最終理解度 推移（リセット時の理解率）",
     L,
-    80
+    60
   );
 }
 
-// ========================================================
+// ===============================
 // コメント表示
-// ========================================================
+// ===============================
 
 function renderComments(comments) {
   commentList.innerHTML = "";
@@ -531,124 +626,210 @@ function renderComments(comments) {
     return;
   }
 
-  comments.slice().reverse().forEach(c => {
-    const div = document.createElement("div");
-    div.className = "comment-item";
+  comments
+    .slice()
+    .reverse()
+    .forEach(c => {
+      const item = document.createElement("div");
+      item.className = "comment-item";
 
-    const meta = document.createElement("div");
-    meta.className = "comment-meta";
+      const meta = document.createElement("div");
+      meta.className = "comment-meta";
 
-    const tag = document.createElement("span");
-    tag.className =
-      "comment-tag " + (c.choice === "understood" ? "understood" : "not-understood");
-    tag.textContent = c.choice === "understood" ? "理解できた" : "理解できなかった";
+      const tag = document.createElement("span");
+      tag.className =
+        "comment-tag " +
+        (c.choice === "understood" ? "understood" : "not-understood");
+      tag.textContent =
+        c.choice === "understood" ? "理解できた" : "理解できなかった";
 
-    const time = document.createElement("span");
-    time.textContent = new Date(c.ts).toLocaleString("ja-JP");
+      const time = document.createElement("span");
+      let timeText = "";
+      try {
+        timeText = new Date(c.ts).toLocaleString("ja-JP");
+      } catch {
+        timeText = c.ts || "";
+      }
+      time.textContent = timeText;
 
-    meta.appendChild(tag);
-    meta.appendChild(time);
+      meta.appendChild(tag);
+      meta.appendChild(time);
 
-    const body = document.createElement("div");
-    body.textContent = c.text;
+      const body = document.createElement("div");
+      body.textContent = c.text || "";
 
-    div.appendChild(meta);
-    div.appendChild(body);
-    commentList.appendChild(div);
-  });
+      item.appendChild(meta);
+      item.appendChild(body);
+      commentList.appendChild(item);
+    });
 }
 
-
-// ========================================================
-// 時刻更新
-// ========================================================
+// ===============================
+// 時刻表示
+// ===============================
 
 function updateTimeLabel() {
+  if (!timeIndicator) return;
   const now = new Date();
-  timeIndicator.textContent =
-    "現在時刻：" +
-    now.toLocaleTimeString("ja-JP", { hour12: false });
+  const text = now.toLocaleTimeString("ja-JP", { hour12: false });
+  timeIndicator.textContent = `現在時刻：${text}`;
 }
 
-
-// ========================================================
+// ===============================
 // 想定人数保存
-// ========================================================
+// ===============================
 
-btnSaveMax.addEventListener("click", async () => {
-  const num = Number(maxInput.value);
-  if (!Number.isFinite(num) || num < 1 || num > 100) {
-    alert("1〜100 の範囲で人数を入力してください。");
-    return;
-  }
+if (btnSaveMax && maxInput) {
+  btnSaveMax.addEventListener("click", async () => {
+    const num = Number(maxInput.value);
 
-  const res = await fetch("/api/admin/max-participants", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ maxParticipants: num })
+    if (!Number.isFinite(num) || num < 1 || num > 100) {
+      alert("1〜100 の範囲で人数を入力してください。");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/admin/max-participants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxParticipants: num })
+      });
+
+      if (!res.ok) throw new Error("failed to update max participants");
+
+      const data = await res.json();
+      maxInfo.textContent =
+        `想定人数：${data.maxParticipants}人中、` +
+        `${numTotal.textContent}人が投票済み`;
+      alert("想定投票人数を保存しました。");
+    } catch (e) {
+      console.error(e);
+      alert(
+        "想定人数の保存に失敗しました。時間をおいて再度お試しください。"
+      );
+    }
   });
+}
 
-  if (!res.ok) return alert("保存に失敗しました。");
+// ===============================
+// テーマ保存
+// ===============================
 
-  alert("想定人数を保存しました。");
-});
+if (btnSaveTheme && themeInput) {
+  btnSaveTheme.addEventListener("click", async () => {
+    const theme = themeInput.value.trim();
 
+    try {
+      const res = await fetch("/api/admin/theme", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ theme })
+      });
 
-// ========================================================
-// セッション単位リセット（過去セッション保存）
-// ========================================================
+      if (!res.ok) throw new Error("failed to save theme");
 
-btnReset.addEventListener("click", async () => {
-  if (!confirm("現在セッションをリセットしますか？")) return;
+      const data = await res.json();
+      themeInfo.textContent = data.theme
+        ? `現在のテーマ：${data.theme}`
+        : "現在のテーマ：未設定";
+      alert("テーマを保存しました。");
+    } catch (e) {
+      console.error(e);
+      alert("テーマの保存に失敗しました。");
+    }
+  });
+}
 
-  const sessionColor = getCurrentColor();
+// ===============================
+// 投票リセット（セッション単位）
+// ★ このタイミングで「リセット時の理解率」を計算して保存
+// ===============================
 
-  if (history.length > 0) {
-    prevSessions.unshift({
-      color: sessionColor,
-      points: history.map(p => ({ ts: p.ts, rate: p.rate }))
-    });
+if (btnReset) {
+  btnReset.addEventListener("click", async () => {
+    const ok = confirm(
+      "現在セッションの票・コメント・グラフをリセットします。\n本当に実行しますか？"
+    );
+    if (!ok) return;
 
-    if (prevSessions.length > 3) prevSessions.pop();
-  }
+    try {
+      const currentColor = getCurrentColor();
 
-  resetCount++;
-  history = [];
+      // ★ リセット時の理解率（表示の rate-understood と同じ式）
+      const u = Number(numUnderstood.textContent) || 0;
+      const n = Number(numNotUnderstood.textContent) || 0;
+      const total = u + n;
+      let finalDisplayRate =
+        total > 0 ? Math.round((u / total) * 100) : 0;
+      if (finalDisplayRate < 0) finalDisplayRate = 0;
+      if (finalDisplayRate > 100) finalDisplayRate = 100;
 
-  await fetch("/api/admin/reset", { method: "POST" });
+      // 現在セッションを過去セッションに保存（先頭に追加）
+      if (history.length > 0) {
+        const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
+        prevSessions.unshift({
+          color: currentColor,
+          points: copy,
+          finalDisplayRate
+        });
+        if (prevSessions.length > 3) prevSessions = prevSessions.slice(0, 3);
+        drawPrevSessions();
+        drawSessionChain();
+      }
 
-  drawPrevSessions();
-  drawSessionChain();
-  fetchResults();
+      // サーバー側リセット
+      const res = await fetch("/api/admin/reset", { method: "POST" });
+      if (!res.ok) throw new Error("failed to reset");
 
-  alert("リセットしました。");
-});
+      // リセット回数（色を進める）
+      resetCount++;
 
+      // 新しいセッションの履歴をクリア
+      history = [];
 
-// ========================================================
-// 全データ完全リセット
-// ========================================================
+      await fetchResults();
+      alert("投票データをリセットしました。");
+    } catch (e) {
+      console.error(e);
+      alert("リセットに失敗しました。時間をおいて再度お試しください。");
+    }
+  });
+}
 
-btnResetAll.addEventListener("click", async () => {
-  if (!confirm("全データを完全リセットしますか？")) return;
+// ===============================
+// 全投票データ完全リセット
+// ===============================
 
-  prevSessions = [];
-  history = [];
-  resetCount = 0;
+if (btnResetAll) {
+  btnResetAll.addEventListener("click", async () => {
+    const ok = confirm(
+      "現在セッション＋過去3セッションのグラフをすべて削除します。\n本当に完全リセットしますか？"
+    );
+    if (!ok) return;
 
-  await fetch("/api/admin/reset-all", { method: "POST" });
+    try {
+      const res = await fetch("/api/admin/reset-all", { method: "POST" });
+      if (!res.ok) throw new Error("failed to reset all");
 
-  drawPrevSessions();
-  drawSessionChain();
-  fetchResults();
+      history = [];
+      prevSessions = [];
+      resetCount = 0;
 
-  alert("完全リセットしました。");
-});
+      drawPrevSessions();
+      drawSessionChain();
+      await fetchResults();
 
+      alert("全投票データを完全リセットしました。");
+    } catch (e) {
+      console.error(e);
+      alert("完全リセットに失敗しました。時間をおいて再度お試しください。");
+    }
+  });
+}
 
-// ========================================================
+// ===============================
 // ログイン
-// ========================================================
+// ===============================
 
 btnUnlock.addEventListener("click", unlock);
 pwInput.addEventListener("keydown", e => {
@@ -656,7 +837,8 @@ pwInput.addEventListener("keydown", e => {
 });
 
 function unlock() {
-  if (pwInput.value !== ADMIN_PASSWORD) {
+  const input = pwInput.value.trim();
+  if (input !== ADMIN_PASSWORD) {
     lockMsg.textContent = "パスワードが違います。";
     return;
   }
@@ -667,7 +849,11 @@ function unlock() {
   fetchResults();
   setInterval(fetchResults, 1000);
 
-  requestAnimationFrame(drawLineChart);
+  if (!animationStarted) {
+    animationStarted = true;
+    requestAnimationFrame(drawLineChart);
+  }
+
   drawPrevSessions();
   drawSessionChain();
 }
