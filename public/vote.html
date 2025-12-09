@@ -1,50 +1,56 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8" />
-    <title>理解度アンケート（投票画面）</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="vote.css" />
+  <meta charset="UTF-8" />
+  <title>興味アンケート</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 既存の CSS ファイル名に合わせてください -->
+  <link rel="stylesheet" href="style.css" />
 </head>
-<body class="vote-body">
-
-<div class="container">
-
-    <h1 class="page-title">理解度アンケート</h1>
-
-    <!-- テーマ -->
-    <h2 id="theme-title" class="theme-title"></h2>
-
+<body>
+  <div class="container">
+    <h1>興味アンケート</h1>
     <p class="desc">
-        今の説明について、あなたの理解度を教えてください。<br />
-        この画面では結果やグラフ・コメント一覧は表示されません（管理者のみ確認できます）。
+      この内容や商品・サービスについて、
+      <strong>どのくらい興味があるか</strong> を教えてください。
     </p>
 
-    <!-- 投票ボタン -->
     <div class="vote-box">
-        <button id="btn-understood" class="btn understood">理解できた</button>
-        <button id="btn-not-understood" class="btn not-understood">あまり理解できなかった</button>
+      <button id="btn-understood" class="btn understood">
+        興味がある
+      </button>
+      <button id="btn-not-understood" class="btn not-understood">
+        あまり興味がない
+      </button>
 
-        <p id="message" class="message"></p>
+      <p id="message" class="message"></p>
+      <p class="small-note">
+        ※ 投票は匿名で集計されます。<br>
+        ※ 1人1回の回答を想定しています。
+      </p>
     </div>
 
-    <p class="note-anon">※この投票は匿名で集計され、個人は特定されません。</p>
-
-    <!-- コメント入力 -->
     <div class="comment-input-box">
-        <p class="desc">
-            任意：感想やわかりにくかった点があれば、自由にコメントを書いてください。<br />
-            （コメントは管理者だけが確認します）
-        </p>
-
-        <textarea id="comment-text" rows="4" placeholder="例）図の説明が少し早かったです など"></textarea>
-
-        <p class="small-note">このコメントは投票とセットで送信されます。</p>
+      <h2>ひとことコメント（任意）</h2>
+      <p class="small-note">
+        気になったこと・もっと知りたい点・良かった点などがあれば、自由にお書きください。
+      </p>
+      <textarea
+        id="comment-input"
+        rows="3"
+        placeholder="例）ここをもう少し詳しく知りたいです／特にこの部分に興味があります など"
+      ></textarea>
+      <div style="margin-top: 8px; text-align: right;">
+        <button id="btn-send-comment" class="btn reset">
+          コメントのみ送信
+        </button>
+      </div>
+      <p class="note-anon">
+        ※ コメントも匿名で送信されます。個人が特定される情報は書かないようご注意ください。
+      </p>
     </div>
+  </div>
 
-</div>
-
-<script src="vote.js"></script>
-
+  <script src="client.js"></script>
 </body>
 </html>
