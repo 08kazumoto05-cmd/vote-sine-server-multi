@@ -1,4 +1,4 @@
-// server.js
+^@]// server.js
 // 投票結果＋コメント＋履歴（理解度グラフ用）＋秘密キー付きURL制限
 
 const express = require("express");
@@ -15,9 +15,9 @@ const ACCESS_KEY = "class2025-secret";
 const store = {
   understood: 0,
   notUnderstood: 0,
-  comments: [],          // { choice, text, ts }
-  history: [],           // { ts, understood, notUnderstood }
-  theme: ""              // アンケートテーマ
+  comments: [],        // { choice, text, ts }
+  history: [],         // { ts, understood, notUnderstood }
+  theme: ""            // アンケートテーマ
 };
 
 // 管理者が設定する想定投票人数（0〜100）
@@ -58,37 +58,96 @@ app.get("/admin.html", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
+// ===== 共通ヘルパー =====
+
+// 票を加算し、コメント＆履歴も記録する共通関数
+function recordVote(choice, commentText) {
+  if (choice === "understood") {
+    store.understood += 1;
+  } else if (choice === "not-understood") {
+    store.notUnderstood += 1;
+  } else {
+    throw new Error("invalid choice");
+  }
+
+  const now = new Date().toISOString();
+
+  // コメント保存（任意）
+  if (commentText && typeof commentText === "string" && commentText.trim()) {
+    store.comments.push({
+      choice,
+      text: commentText.trim(),
+      ts: now
+    });
+  }
+
+  // 履歴に「累計値」を記録（管理画面のグラフ用）
+  store.history.push({
+    ts: now,
+    understood: store.understood,
+    notUnderstood: store.notUnderstood
+  });
+}
+
 // ===== API =====
 
-// 投票 API
+// ★ 旧仕様：まとめて投票（choice, comment を JSON で受け取る）
 app.post("/api/vote", (req, res) => {
   try {
     const { choice, comment } = req.body || {};
 
-    if (choice === "understood") {
-      store.understood += 1;
-    } else if (choice === "not-understood") {
-      store.notUnderstood += 1;
-    } else {
+    if (choice !== "understood" && choice !== "not-understood") {
       return res.status(400).json({ success: false, error: "invalid choice" });
+    }
+
+    recordVote(choice, comment);
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, error: "internal error" });
+  }
+});
+
+// ★ 新仕様：/api/vote/understood（body なしでもOK）
+app.post("/api/vote/understood", (req, res) => {
+  try {
+    recordVote("understood", null);
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, error: "internal error" });
+  }
+});
+
+// ★ 新仕様：/api/vote/not-understood（body なしでもOK）
+app.post("/api/vote/not-understood", (req, res) => {
+  try {
+    recordVote("not-understood", null);
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, error: "internal error" });
+  }
+});
+
+// ★ コメントだけ送る API（票数は増やさない）
+app.post("/api/comment", (req, res) => {
+  try {
+    const { text } = req.body || {};
+    const commentText = typeof text === "string" ? text.trim() : "";
+
+    if (!commentText) {
+      return res
+        .status(400)
+        .json({ success: false, error: "comment text is empty" });
     }
 
     const now = new Date().toISOString();
 
-    // コメント保存（任意）
-    if (comment && typeof comment === "string" && comment.trim().length > 0) {
-      store.comments.push({
-        choice,
-        text: comment.trim(),
-        ts: now
-      });
-    }
-
-    // 履歴に「累計値」を記録（管理画面のグラフ用）
-    store.history.push({
-      ts: now,
-      understood: store.understood,
-      notUnderstood: store.notUnderstood
+    store.comments.push({
+      choice: "comment-only",
+      text: commentText,
+      ts: now
     });
 
     res.json({ success: true });
@@ -123,8 +182,7 @@ app.post("/api/admin/reset", (req, res) => {
   res.json({ success: true });
 });
 
-// ★ 管理者用：全投票データを完全リセット
-//   現在セッション＋過去セッション用のデータをすべてクリアする想定
+// 管理者用：全投票データを完全リセット
 app.post("/api/admin/reset-all", (req, res) => {
   // 票・コメント・履歴をクリア
   store.understood = 0;
@@ -142,8 +200,7 @@ app.post("/api/admin/reset-all", (req, res) => {
 // 結果取得 API（管理画面用）
 app.get("/api/results", (req, res) => {
   const total = store.understood + store.notUnderstood;
-  const rateUnderstood =
-    total > 0 ? store.understood / total : 0;
+  const rateUnderstood = total > 0 ? store.understood / total : 0;
 
   const comments = store.comments.slice(-100);
   const history = store.history.slice(-200);
