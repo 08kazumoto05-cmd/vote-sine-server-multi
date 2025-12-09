@@ -1,103 +1,92 @@
-// client.js - 投票者用画面（興味バージョン）
-//
-// ・ボタン表示：
-//    「興味がある」         → choice: "understood"
-//    「あまり興味がない」   → choice: "not-understood"
-// ・コメントだけ送ることも可能
-// ・サーバ側 API 仕様は admin 側と同じ（/api/vote）
+// ===========================
+// client.js（興味度アンケート用）
+// ===========================
 
+// DOM参照
 const btnUnderstood = document.getElementById("btn-understood");
 const btnNotUnderstood = document.getElementById("btn-not-understood");
 const btnSendComment = document.getElementById("btn-send-comment");
-const messageEl = document.getElementById("message");
+const message = document.getElementById("message");
 const commentInput = document.getElementById("comment-input");
+const themeTitle = document.getElementById("theme-title");
 
-// メッセージ表示用ヘルパー
-function showMessage(text, isError = false) {
-  if (!messageEl) return;
-  messageEl.textContent = text;
-  messageEl.style.color = isError ? "#e53935" : "#1976d2";
-}
-
-// 投票送信
-async function sendVote(choice) {
-  const comment = commentInput ? commentInput.value.trim() : "";
-
+// ----------------------------
+// テーマを取得（管理画面側で設定）
+// ----------------------------
+async function fetchTheme() {
   try {
-    const res = await fetch("/api/vote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        choice,      // "understood" or "not-understood"
-        text: comment || null
-      })
-    });
-
-    if (!res.ok) throw new Error("サーバーエラー");
-
-    showMessage("ご回答ありがとうございました。", false);
-
-    // 送信後はコメント欄だけ空にしておく
-    if (commentInput) {
-      commentInput.value = "";
+    const res = await fetch("/api/results");
+    const data = await res.json();
+    if (data.theme) {
+      themeTitle.textContent = data.theme;
     }
   } catch (e) {
     console.error(e);
-    showMessage(
-      "送信に失敗しました。通信環境をご確認のうえ、もう一度お試しください。",
-      true
-    );
   }
 }
+fetchTheme();
 
-// コメントのみ送信
-async function sendCommentOnly() {
-  const comment = commentInput ? commentInput.value.trim() : "";
-  if (!comment) {
-    showMessage("コメントを入力してください。", true);
+
+// ----------------------------
+// 興味あり（理解できた）
+// ----------------------------
+btnUnderstood.addEventListener("click", async () => {
+
+  // ★ 再確認を促す
+  const ok = confirm("本当に『興味がある』で回答しますか？");
+  if (!ok) return;
+
+  try {
+    const res = await fetch("/api/vote/understood", { method: "POST" });
+    if (!res.ok) throw new Error("vote failed");
+
+    message.textContent = "『興味がある』で回答しました。ありがとうございました！";
+  } catch (e) {
+    console.error(e);
+    message.textContent = "送信エラーが発生しました。";
+  }
+});
+
+
+// ----------------------------
+// あまり興味がない（理解できなかった）
+// ----------------------------
+btnNotUnderstood.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/vote/not-understood", { method: "POST" });
+    if (!res.ok) throw new Error("vote failed");
+
+    message.textContent = "『あまり興味がない』で回答しました。ありがとうございました！";
+  } catch (e) {
+    console.error(e);
+    message.textContent = "送信エラーが発生しました。";
+  }
+});
+
+
+// ----------------------------
+// コメント送信
+// ----------------------------
+btnSendComment.addEventListener("click", async () => {
+  const text = commentInput.value.trim();
+  if (!text) {
+    message.textContent = "コメントが空です。";
     return;
   }
 
   try {
-    const res = await fetch("/api/vote", {
+    const res = await fetch("/api/comment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        choice: null,   // 票は増やさず、コメントだけ残したい場合
-        text: comment
-      })
+      body: JSON.stringify({ text })
     });
 
-    if (!res.ok) throw new Error("サーバーエラー");
+    if (!res.ok) throw new Error("comment failed");
 
-    showMessage("コメントを送信しました。ありがとうございます。", false);
-    if (commentInput) commentInput.value = "";
+    message.textContent = "コメントを送信しました。";
+    commentInput.value = "";
   } catch (e) {
     console.error(e);
-    showMessage(
-      "コメントの送信に失敗しました。時間をおいて再度お試しください。",
-      true
-    );
+    message.textContent = "送信エラーが発生しました。";
   }
-}
-
-// イベント登録
-if (btnUnderstood) {
-  btnUnderstood.addEventListener("click", () => {
-    // 「興味がある」 → understood 側にカウント
-    sendVote("understood");
-  });
-}
-
-if (btnNotUnderstood) {
-  btnNotUnderstood.addEventListener("click", () => {
-    // 「あまり興味がない」 → not-understood 側にカウント
-    sendVote("not-understood");
-  });
-}
-
-if (btnSendComment) {
-  btnSendComment.addEventListener("click", () => {
-    sendCommentOnly();
-  });
-}
+});

@@ -2,22 +2,21 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>興味アンケート</title>
+  <title>興味度アンケート</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- ★ ファイル名を vote.css に -->
   <link rel="stylesheet" href="vote.css" />
 </head>
 <body class="vote-body">
   <div class="container">
     <!-- タイトル -->
-    <h1 class="page-title">興味アンケート</h1>
+    <h1 class="page-title">興味度アンケート</h1>
 
-    <!-- テーマ（必要なければ文言だけ使ってOK） -->
+    <!-- テーマ（管理画面から入る） -->
     <p class="theme-title" id="theme-title">
       今回の内容について、どのくらい興味があるか教えてください。
     </p>
 
-    <!-- 説明 -->
+    <!-- 説明文 -->
     <p class="desc">
       このサービス・講義・商品について、<br />
       <strong>あなたの興味の度合い</strong> を教えてください。
@@ -25,33 +24,29 @@
 
     <!-- 投票ボタン -->
     <div class="vote-box">
-      <!-- 「理解できた」 → 「興味がある」 -->
       <button id="btn-understood" class="btn understood">
         興味がある
       </button>
 
-      <!-- 「あまり理解できなかった」 → 「あまり興味がない」 -->
       <button id="btn-not-understood" class="btn not-understood">
         あまり興味がない
       </button>
     </div>
 
-    <!-- メッセージ表示 -->
     <p id="message" class="message"></p>
-    <p class="small-note">
-      ※ 投票は集計のみに利用されます。お一人1回の回答を想定しています。
-    </p>
+    <p class="small-note">※ お一人1回の回答を想定しています。</p>
 
-    <!-- コメント入力 -->
+    <!-- コメント入力欄 -->
     <div class="comment-input-box">
       <h2 class="comment-title">ひとことコメント（任意）</h2>
       <p class="small-note">
-        気になった点・もっと知りたい点・良かった点などがあれば、自由にお書きください。
+        気になった点・もっと知りたい点・感想などがあれば、自由にお書きください。
       </p>
+
       <textarea
         id="comment-input"
         rows="3"
-        placeholder="例）ここをもう少し詳しく知りたいです / 特にこの部分に興味があります など"
+        placeholder="例）この部分に興味があります / もっと知りたい内容でした など"
       ></textarea>
 
       <div class="comment-button-row">
@@ -61,12 +56,11 @@
       </div>
 
       <p class="note-anon">
-        ※ コメントも匿名で送信されます。個人が特定される情報は書かないようお願いいたします。
+        ※ コメントも匿名で送信されます。個人が特定される内容は書かないようお願いいたします。
       </p>
     </div>
   </div>
 
-  <!-- JS はそのまま -->
   <script src="client.js"></script>
 </body>
 </html>
