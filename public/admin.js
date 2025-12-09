@@ -2,7 +2,7 @@
 // admin.js（パスワード cpa1968 版）
 // ・現在セッション/過去セッション：0〜100%表示、0スタート演出
 // ・最終理解度％：投票リセット時の「理解率」を保存して表示
-// ・連結グラフ：各セッションの最終理解度％を頂点にした折れ線
+// ・連結グラフ：左端0%からスタートし、各セッションの最終理解度％を頂点にした折れ線
 // =======================================
 
 const ADMIN_PASSWORD = "cpa1968";
@@ -439,9 +439,9 @@ function drawPrevSessions() {
 }
 
 // ==== セッション1〜3 連結グラフ ====
-// ・各セッションの「最終理解度％(finalDisplayRate)」だけを使う
-// ・古いセッション → 新しいセッションの順に折れ線で結ぶ
-// ・頂点の上に「◯◯％」を表示
+// ・左端のスタート地点は必ず 0%（セッション前）
+// ・1回目のリセット以降は、各セッションの最終理解度％をその後の頂点として表示
+//   例： [0%, セッション1最終％, セッション2最終％, …] を折れ線で結ぶ
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
@@ -460,6 +460,7 @@ function drawSessionChain() {
     .filter(s => s && s.points && s.points.length > 0);
 
   if (sessions.length === 0) {
+    // セッションがまだ1つもないときは「0％だけ」のラインにせず、メッセージ表示
     sessionChainCtx.fillStyle = "#CCCCCC";
     sessionChainCtx.font = "16px sans-serif";
     sessionChainCtx.textAlign = "center";
@@ -484,6 +485,9 @@ function drawSessionChain() {
     if (v > 100) v = 100;
     return v;
   });
+
+  // ★スタート地点 0% を先頭に追加して表示用配列を作る
+  const displayRates = [0, ...finalRates];
 
   const L = 60, R = 30, T = 40, B = 70;
   const plotW = w - L - R;
@@ -528,22 +532,20 @@ function drawSessionChain() {
     sessionChainCtx.fillText(v + "%", L - 8, y);
   });
 
-  // X軸方向：セッション数に応じて等間隔に配置
-  const count = finalRates.length;
-  const stepX = count > 1 ? plotW / (count - 1) : 0;
+  // X軸方向：スタート＋セッション数分を等間隔に配置
+  const pointCount = displayRates.length; // 0スタートを含めた点の数
+  const stepX = pointCount > 1 ? plotW / (pointCount - 1) : 0;
 
-  // 補助的なX軸ラベル用位置
   const xPositions = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < pointCount; i++) {
     xPositions.push(L + stepX * i);
   }
 
-  // 折れ線をセッション色で描画
+  // 折れ線（全体）を描画
   sessionChainCtx.lineWidth = 3;
   sessionChainCtx.setLineDash([]);
-
   sessionChainCtx.beginPath();
-  finalRates.forEach((rate, idx) => {
+  displayRates.forEach((rate, idx) => {
     const x = xPositions[idx];
     const y = valueToY(rate, h, B, plotH);
     if (idx === 0) sessionChainCtx.moveTo(x, y);
@@ -552,15 +554,33 @@ function drawSessionChain() {
   sessionChainCtx.strokeStyle = "#ffffff88";
   sessionChainCtx.stroke();
 
-  // 各セッションの頂点とラベル
-  finalRates.forEach((rate, idx) => {
+  // 各セッションの頂点とラベル（スタート0は点だけ or ラベルだけにする）
+  displayRates.forEach((rate, idx) => {
     const x = xPositions[idx];
     const y = valueToY(rate, h, B, plotH);
 
-    // 点
+    if (idx === 0) {
+      // スタート0点（色はグレー系）
+      sessionChainCtx.fillStyle = "#9ca3af";
+      sessionChainCtx.beginPath();
+      sessionChainCtx.arc(x, y, 5, 0, Math.PI * 2);
+      sessionChainCtx.fill();
+
+      sessionChainCtx.font = "12px sans-serif";
+      sessionChainCtx.fillStyle = "#9ca3af";
+      sessionChainCtx.textAlign = "center";
+      sessionChainCtx.textBaseline = "bottom";
+      sessionChainCtx.fillText("0%", x, y - 6);
+      return;
+    }
+
+    // セッションの点
+    const sessionIndex = idx - 1; // displayRates[1] がセッション1
     const color =
-      sessions[idx].color ||
-      SESSION_COLORS[Math.min(idx, SESSION_COLORS.length - 1)];
+      sessions[sessionIndex].color ||
+      SESSION_COLORS[Math.min(sessionIndex, SESSION_COLORS.length - 1)];
+
+    // 点
     sessionChainCtx.fillStyle = color;
     sessionChainCtx.beginPath();
     sessionChainCtx.arc(x, y, 5, 0, Math.PI * 2);
@@ -579,10 +599,16 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#9CA3AF";
   sessionChainCtx.textAlign = "center";
   sessionChainCtx.textBaseline = "top";
-  xPositions.forEach((x, idx) => {
-    const labelIdx = count - idx; // 古い順で 1→2→3 だが、prevSessionsの仕様に合わせておく
+
+  // スタート位置
+  sessionChainCtx.fillText("スタート", xPositions[0], h - B + 10);
+
+  // 各セッション
+  for (let i = 0; i < sessions.length; i++) {
+    const x = xPositions[i + 1]; // 0番目はスタート
+    const labelIdx = i + 1;
     sessionChainCtx.fillText(`セッション${labelIdx}`, x, h - B + 10);
-  });
+  }
 
   // タイトル
   sessionChainCtx.font = "15px sans-serif";
@@ -590,7 +616,7 @@ function drawSessionChain() {
   sessionChainCtx.textAlign = "left";
   sessionChainCtx.textBaseline = "top";
   sessionChainCtx.fillText(
-    "セッション別 最終理解度 推移（投票リセット時の理解率）",
+    "セッション別 最終理解度 推移（スタート0％ → 各セッションのリセット時理解率）",
     L + 4,
     6
   );
@@ -732,7 +758,7 @@ if (btnReset) {
       const currentColor = getCurrentColor();
 
       if (history.length > 0) {
-        // ★ リセット時点の理解率（写真の右端の「理解率」と同じ計算）
+        // ★ リセット時点の理解率（画面右端の「理解率」と同じ計算）
         const u = Number(numUnderstood.textContent) || 0;
         const n = Number(numNotUnderstood.textContent) || 0;
         const total = u + n;
