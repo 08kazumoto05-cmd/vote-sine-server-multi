@@ -3,6 +3,7 @@
 //   ・値 = (理解できた − 理解できなかった) ÷ 想定人数 × 100
 //   ・範囲は 0〜100（マイナスは 0 にクリップ）
 //   ・各セッションのグラフは「必ず 0 からスタート」して見せる
+//     → 描画時に先頭に「仮の 0 点」を 1 個追加して線を引く
 // ● セッション1〜3連結グラフ
 //   ・0〜100% のプラス表示のみ
 //   ・色はセッションごと（青→赤→緑）
@@ -59,7 +60,7 @@ const prevRateLabels = [
   document.getElementById("prevChart-rate2"),
   document.getElementById("prevChart-rate3")
 ];
-const prevCtxs = prevCanvases.map((c) => (c ? c.getContext("2d") : null));
+const prevCtxs = prevCanvases.map(c => (c ? c.getContext("2d") : null));
 
 // セッション1〜3連結グラフ用キャンバス
 const sessionChainCanvas = document.getElementById("sessionChain");
@@ -80,7 +81,7 @@ let prevSessions = [];
 // リセット回数（0:初回, 1:1回目リセット後, 2:2回目リセット後…）
 let resetCount = 0;
 
-// セッションごとの色
+// セッションごとの色（Aパターン）
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a"];
 
 // 描画ループフラグ
@@ -197,7 +198,7 @@ function addRatePoint(rate) {
 }
 
 // ==== 現在セッションのグラフ描画 ====
-// 表示上：1点目を必ず 0 として描画（0スタートに見せる）
+// 表示上：先頭に「仮の 0 点」を追加して 0 スタートを演出（1票目もちゃんと反映）
 
 function drawLineChart() {
   const w = canvas.width;
@@ -285,25 +286,31 @@ function drawLineChart() {
   });
   ctx.setLineDash([]);
 
-  // X座標
-  const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
+  // ★ 描画用の点数は「history.length + 1」(先頭に0点)
+  const drawLen = history.length + 1;
+  const stepX = drawLen > 1 ? plotW / (drawLen - 1) : 0;
 
-  // 線色
   const currentColor = getCurrentColor();
-
   ctx.strokeStyle = currentColor;
   ctx.lineWidth = 2.5;
   ctx.setLineDash([]);
   ctx.beginPath();
 
-  history.forEach((p, i) => {
-    // 1点目だけは 0 として描画（0スタート演出）
-    const displayRate = i === 0 ? 0 : p.rate;
+  for (let i = 0; i < drawLen; i++) {
     const x = L + i * stepX;
-    const y = valueToY(displayRate, h, B, plotH);
+    let rate;
+    if (i === 0) {
+      // 先頭は必ず0でスタート
+      rate = 0;
+    } else {
+      // 以降は history の実データ
+      rate = history[i - 1].rate;
+    }
+    const y = valueToY(rate, h, B, plotH);
+
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
-  });
+  }
   ctx.stroke();
 
   // タイトル
@@ -321,7 +328,7 @@ function drawLineChart() {
 }
 
 // ==== 過去セッションのグラフ描画 ====
-// ・各セッション 1 点目は 0 として描画（0スタート）
+// ・各セッション 1 点目は「0 の仮想点」→ そこから実データへ
 // ・右横に「最終理解度：◯◯％」を表示
 
 function drawPrevSessions() {
@@ -360,7 +367,7 @@ function drawPrevSessions() {
       note.textContent = `${label}のセッション：理解度の推移（0〜100％）`;
     }
 
-    // ★ 最終理解度％を表示
+    // 最終理解度％を表示（0〜100にクリップ）
     if (rateLabel) {
       const lastPoint = hist[hist.length - 1];
       let lastRate = lastPoint ? lastPoint.rate : 0;
@@ -425,21 +432,28 @@ function drawPrevSessions() {
     });
     pctx.setLineDash([]);
 
-    const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
+    // ★ 描画用の点数は「hist.length + 1」(先頭に0点)
+    const drawLen = hist.length + 1;
+    const stepX = drawLen > 1 ? plotW / (drawLen - 1) : 0;
 
-    // セッションごとの色で線を描画（1点目は0）
     pctx.strokeStyle = color || "#4fc3f7";
     pctx.lineWidth = 2;
     pctx.setLineDash([]);
     pctx.beginPath();
 
-    hist.forEach((p, idx) => {
-      const displayRate = idx === 0 ? 0 : p.rate;
+    for (let idx = 0; idx < drawLen; idx++) {
       const x = L + idx * stepX;
-      const y = valueToY(displayRate, h, B, plotH);
+      let rate;
+      if (idx === 0) {
+        rate = 0; // 先頭は必ず 0
+      } else {
+        rate = hist[idx - 1].rate;
+      }
+      const y = valueToY(rate, h, B, plotH);
+
       if (idx === 0) pctx.moveTo(x, y);
       else pctx.lineTo(x, y);
-    });
+    }
     pctx.stroke();
   }
 }
@@ -447,6 +461,8 @@ function drawPrevSessions() {
 // ==== セッション1〜3 連結グラフ ====
 // セッション1→2→3 を 1 本の線のように見せる。
 // 値は 0〜100% にクリップし、色は各セッション色。
+// ここでは「本来の rate」をそのまま使い（0スタート補正はしない）
+// 前のセッション終点と次のセッション始点がつながるようオフセット。
 
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
@@ -501,12 +517,8 @@ function drawSessionChain() {
   sessionChainCtx.lineTo(w - R, h - B);
   sessionChainCtx.stroke();
 
-  // Y軸（0〜100）
+  // Y軸（0〜100）※目盛線のみ（ラベルは描かない仕様も可）
   const yTicks = [0, 25, 50, 75, 100];
-  sessionChainCtx.font = "10px sans-serif";
-  sessionChainCtx.textAlign = "right";
-  sessionChainCtx.textBaseline = "middle";
-
   yTicks.forEach(v => {
     const y = valueToY(v, h, B, plotH);
 

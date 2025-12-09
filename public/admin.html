@@ -142,50 +142,47 @@
           <canvas id="sineCanvas" width="900" height="260"></canvas>
         </div>
 
-        <!-- 過去3セッションのグラフ（最終理解度％付き） -->
-        <div class="card">
-          <div class="card-header-row">
-            <h2 class="card-title">過去セッションの理解度推移</h2>
-            <span class="card-caption">
-              最近3回分までのセッションが保存されます。
-            </span>
-          </div>
+        <!-- 過去3セッションのグラフ（最終理解度％付き・大型化） -->
+<div class="card">
+  <div class="card-header-row">
+    <h2 class="card-title">過去セッションの理解度推移</h2>
+    <span class="card-caption">
+      最近3回分までのセッションが保存されます。
+    </span>
+  </div>
 
-          <div class="prev-session-wrap">
-            <!-- 直近のひとつ前 -->
-            <div class="prev-session-block">
-              <p class="card-caption">
-                <span id="prevChart-note1">
-                  1つ前のセッション：まだグラフはありません。
-                </span>
-                <span id="prevChart-rate1" class="prev-session-rate"></span>
-              </p>
-              <canvas id="prevChart1" width="900" height="120"></canvas>
-            </div>
+  <div class="prev-session-wrap">
 
-            <!-- 2つ前 -->
-            <div class="prev-session-block">
-              <p class="card-caption">
-                <span id="prevChart-note2">
-                  2つ前のセッション：まだグラフはありません。
-                </span>
-                <span id="prevChart-rate2" class="prev-session-rate"></span>
-              </p>
-              <canvas id="prevChart2" width="900" height="120"></canvas>
-            </div>
+    <!-- 直近のひとつ前 -->
+    <div class="prev-session-block">
+      <p class="card-caption">
+        <span id="prevChart-note1">1つ前のセッション：まだグラフはありません。</span>
+        <span id="prevChart-rate1" class="prev-session-rate"></span>
+      </p>
+      <canvas id="prevChart1" width="1000" height="200"></canvas>
+    </div>
 
-            <!-- 3つ前 -->
-            <div class="prev-session-block">
-              <p class="card-caption">
-                <span id="prevChart-note3">
-                  3つ前のセッション：まだグラフはありません。
-                </span>
-                <span id="prevChart-rate3" class="prev-session-rate"></span>
-              </p>
-              <canvas id="prevChart3" width="900" height="120"></canvas>
-            </div>
-          </div>
-        </div>
+    <!-- 2つ前 -->
+    <div class="prev-session-block">
+      <p class="card-caption">
+        <span id="prevChart-note2">2つ前のセッション：まだグラフはありません。</span>
+        <span id="prevChart-rate2" class="prev-session-rate"></span>
+      </p>
+      <canvas id="prevChart2" width="1000" height="200"></canvas>
+    </div>
+
+    <!-- 3つ前 -->
+    <div class="prev-session-block">
+      <p class="card-caption">
+        <span id="prevChart-note3">3つ前のセッション：まだグラフはありません。</span>
+        <span id="prevChart-rate3" class="prev-session-rate"></span>
+      </p>
+      <canvas id="prevChart3" width="1000" height="200"></canvas>
+    </div>
+
+  </div>
+</div>
+
 
         <!-- セッション1〜3 連結グラフ（コメントより上） -->
         <div class="card">
