@@ -1,5 +1,5 @@
 // ===============================
-// admin.js（連結グラフ：0スタート→各セッション最終理解度）
+// admin.js（連結グラフ：0スタート→各セッション最終興味度）
 // ===============================
 //
 // ・管理パスワード: cpa1968
@@ -7,10 +7,10 @@
 // ・各セッションのグラフは 1点目だけ0として描画（0スタート演出）
 // ・過去セッションは最大3件保存
 // ・連結グラフ：
-//    0% → セッション1最終理解度 → セッション2最終理解度 → セッション3最終理解度
+//    0% → セッション1最終興味度 → セッション2最終興味度 → セッション3最終興味度
 //    という折れ線。セグメントごとにセッション色で描画。
-// ・「最終理解度」は、リセットボタンを押した時点の「理解率カード」の値（表示％）を保存して使用
-// ・NEW: 連結グラフの各セッション最終到達点に、そのセッションと同じ色の点＋％ラベルを描画
+// ・「最終興味度」は、リセットボタンを押した時点の「興味度カード」の値（表示％）を保存して使用
+// ・各セッション最終到達点に、そのセッションと同じ色の点＋％ラベルを描画
 
 // ==== パスワード ====
 const ADMIN_PASSWORD = "cpa1968";
@@ -121,7 +121,7 @@ async function fetchResults() {
     numNotUnderstood.textContent = n;
     numTotal.textContent         = total;
 
-    // 表示用理解率（普通の％）※ここが「最終理解度」に使われる
+    // 表示用興味度（％）※ここが「最終興味度」に使われる
     const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
     rateUnderstood.textContent = rateDisplay + "%";
 
@@ -135,6 +135,7 @@ async function fetchResults() {
       } else if (total === 0 && history.length === 0) {
         rate = null; // まだ何も描かない
       } else {
+        // 興味度 = (興味がある − あまり興味がない) / 想定人数 * 100
         rate = ((u - n) / maxP) * 100;
         if (rate < 0) rate = 0;
         if (rate > 100) rate = 100;
@@ -310,7 +311,7 @@ function drawLineChart() {
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.fillText(
-    "現在セッション理解度推移（0〜100％）",
+    "現在セッション興味度推移（0〜100％）",
     L + 4,
     8
   );
@@ -320,7 +321,7 @@ function drawLineChart() {
 
 // ==== 過去セッションのグラフ描画 ====
 // ・各セッション 1 点目は 0 として描画（0スタート）
-// ・右横に「最終理解度：◯◯％」を表示
+// ・右横に「最終興味度：◯◯％」を表示
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
     const session   = prevSessions[i];
@@ -352,10 +353,10 @@ function drawPrevSessions() {
 
     if (note) {
       const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : "3つ前";
-      note.textContent = `${label}のセッション：理解度の推移（0〜100％）`;
+      note.textContent = `${label}のセッション：興味度の推移（0〜100％）`;
     }
 
-    // 最終理解度％（reset時の理解率カードの値）を使用
+    // 最終興味度％（reset時の興味度カードの値）を使用
     if (rateLabel) {
       let lastRate =
         typeof session.finalRate === "number"
@@ -363,7 +364,7 @@ function drawPrevSessions() {
           : (hist[hist.length - 1]?.rate ?? 0);
       if (lastRate < 0) lastRate = 0;
       if (lastRate > 100) lastRate = 100;
-      rateLabel.textContent = `（最終理解度：${Math.round(lastRate)}%）`;
+      rateLabel.textContent = `（最終興味度：${Math.round(lastRate)}%）`;
     }
 
     const L = 60, R = 40, T = 40, B = 60;
@@ -437,10 +438,10 @@ function drawPrevSessions() {
 }
 
 // ==== セッション1〜3 連結グラフ ====
-// ・第1セッション: 0% → 最終理解度 まで線が上昇
-// ・第2,3セッション: 前セッションの最終理解度 → 自分の最終理解度
+// ・第1セッション: 0% → 最終興味度 まで線が上昇
+// ・第2,3セッション: 前セッションの最終興味度 → 自分の最終興味度
 // ・各区間は該当セッションの色で描画
-// ・NEW: 各セッションの最終到達点に同じ色の丸い点＋％ラベルを描画
+// ・各セッションの最終到達点に同じ色の丸い点＋％ラベルを描画
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
@@ -468,7 +469,7 @@ function drawSessionChain() {
 
   // ---- 連結用のポイント列（0スタート込み） ----
   // 先頭: 0%（第1セッションと同じ色）
-  // その後: 各セッションの最終理解度（reset時の理解率）
+  // その後: 各セッションの最終興味度（reset時の値）
   const chainPoints = [];
 
   // 0% スタート
@@ -480,7 +481,7 @@ function drawSessionChain() {
     isSessionPoint: false // 0%の起点
   });
 
-  // 各セッションの最終理解度
+  // 各セッションの最終興味度
   sessionsOldestFirst.forEach((session, idx) => {
     let r =
       typeof session.finalRate === "number"
@@ -586,7 +587,7 @@ function drawSessionChain() {
     lastY = y;
   });
 
-  // 次に、各セッションの最終到達点に点＋％ラベルを描画
+  // 各セッションの最終到達点に点＋％ラベルを描画
   const pointRadius = 10;
   chainPoints.forEach((pt, idx) => {
     if (!pt.isSessionPoint) return; // 0%起点はスキップ
@@ -620,7 +621,7 @@ function drawSessionChain() {
   sessionChainCtx.textAlign = "left";
   sessionChainCtx.textBaseline = "top";
   sessionChainCtx.fillText(
-    "セッション1→2→3 最終理解度 連結グラフ（色付きポイント＋％が各セッションの最終値）",
+    "セッション1→2→3 最終興味度 連結グラフ（色付きポイント＋％が各セッションの最終値）",
     L,
     60
   );
@@ -653,7 +654,7 @@ function renderComments(comments) {
         "comment-tag " +
         (c.choice === "understood" ? "understood" : "not-understood");
       tag.textContent =
-        c.choice === "understood" ? "理解できた" : "理解できなかった";
+        c.choice === "understood" ? "興味がある" : "あまり興味がない";
 
       const time = document.createElement("span");
       let timeText = "";
