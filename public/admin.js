@@ -10,7 +10,7 @@
 //    0% → セッション1最終理解度 → セッション2最終理解度 → セッション3最終理解度
 //    という折れ線。セグメントごとにセッション色で描画。
 // ・「最終理解度」は、リセットボタンを押した時点の「理解率カード」の値（表示％）を保存して使用
-// ・NEW: 連結グラフの各セッション最終到達点に、そのセッションと同じ色の点を描画
+// ・NEW: 連結グラフの各セッション最終到達点に、そのセッションと同じ色の点＋％ラベルを描画
 
 // ==== パスワード ====
 const ADMIN_PASSWORD = "cpa1968";
@@ -33,14 +33,14 @@ const ctx    = canvas.getContext("2d");
 const commentList   = document.getElementById("comment-list");
 const timeIndicator = document.getElementById("time-indicator");
 
-const maxInput  = document.getElementById("max-participants-input");
+const maxInput   = document.getElementById("max-participants-input");
 const btnSaveMax = document.getElementById("btn-save-max");
 const maxInfo    = document.getElementById("max-participants-info");
 
 const btnReset    = document.getElementById("btn-reset");
 const btnResetAll = document.getElementById("btn-reset-all");
 
-const themeInput  = document.getElementById("theme-input");
+const themeInput   = document.getElementById("theme-input");
 const btnSaveTheme = document.getElementById("btn-save-theme");
 const themeInfo    = document.getElementById("theme-info");
 
@@ -440,7 +440,7 @@ function drawPrevSessions() {
 // ・第1セッション: 0% → 最終理解度 まで線が上昇
 // ・第2,3セッション: 前セッションの最終理解度 → 自分の最終理解度
 // ・各区間は該当セッションの色で描画
-// ・NEW: 各セッションの最終到達点に同じ色の丸い点を描画
+// ・NEW: 各セッションの最終到達点に同じ色の丸い点＋％ラベルを描画
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
@@ -586,7 +586,7 @@ function drawSessionChain() {
     lastY = y;
   });
 
-  // 次に、各セッションの最終到達点に点を描画
+  // 次に、各セッションの最終到達点に点＋％ラベルを描画
   const pointRadius = 10;
   chainPoints.forEach((pt, idx) => {
     if (!pt.isSessionPoint) return; // 0%起点はスキップ
@@ -594,7 +594,7 @@ function drawSessionChain() {
     const x = L + stepX * idx;
     const y = valueToY(pt.rate, h, B, plotH);
 
-    // 白い縁
+    // 白い縁の丸
     sessionChainCtx.beginPath();
     sessionChainCtx.arc(x, y, pointRadius + 2, 0, Math.PI * 2);
     sessionChainCtx.fillStyle = "#FFFFFF";
@@ -605,6 +605,13 @@ function drawSessionChain() {
     sessionChainCtx.arc(x, y, pointRadius, 0, Math.PI * 2);
     sessionChainCtx.fillStyle = pt.color;
     sessionChainCtx.fill();
+
+    // ％ラベル（点の少し上に、同じ色で）
+    sessionChainCtx.font = "28px sans-serif";
+    sessionChainCtx.textAlign = "center";
+    sessionChainCtx.textBaseline = "bottom";
+    sessionChainCtx.fillStyle = pt.color;
+    sessionChainCtx.fillText(`${Math.round(pt.rate)}%`, x, y - pointRadius - 10);
   });
 
   // タイトル
@@ -613,7 +620,7 @@ function drawSessionChain() {
   sessionChainCtx.textAlign = "left";
   sessionChainCtx.textBaseline = "top";
   sessionChainCtx.fillText(
-    "セッション1→2→3 最終理解度 連結グラフ（色付きポイントが各セッションの最終値）",
+    "セッション1→2→3 最終理解度 連結グラフ（色付きポイント＋％が各セッションの最終値）",
     L,
     60
   );
@@ -751,8 +758,8 @@ if (btnReset) {
 
       // 現在セッションを過去セッションに保存（先頭に追加）
       if (history.length > 0) {
-        const rateText = rateUnderstood.textContent || "0%";
-        const numeric  = parseInt(rateText.replace("%", ""), 10) || 0;
+        const rateText  = rateUnderstood.textContent || "0%";
+        const numeric   = parseInt(rateText.replace("%", ""), 10) || 0;
         const finalRate = Math.max(0, Math.min(100, numeric));
 
         const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
