@@ -7,9 +7,7 @@
   <link rel="stylesheet" href="admin.css" />
 </head>
 
-
 <body class="admin-body">
-
 
   <!-- ロック画面 -->
   <div id="lock-screen" class="admin-lock-screen">
@@ -17,18 +15,15 @@
       <h1 class="logo">Understanding Monitor</h1>
       <p class="lock-desc">管理者パスワードを入力してください。</p>
 
-
       <input id="admin-password" type="password" class="input-text" placeholder="管理者パスワード" />
       <button id="btn-unlock" class="btn primary wide">ログイン</button>
       <p id="lock-message" class="lock-message"></p>
     </div>
   </div>
 
-
   <!-- 管理画面本体 -->
   <div id="admin-content" class="admin-shell" style="display:none;">
     <div class="admin-bg-glow"></div>
-
 
     <header class="admin-header">
       <div>
@@ -42,37 +37,32 @@
       </div>
     </header>
 
-
     <main class="admin-main">
-
 
       <!-- 左カラム -->
       <section class="admin-panel">
-
 
         <!-- テーマ設定 -->
         <div class="card neon">
           <h2 class="card-title">アンケートテーマ</h2>
           <p id="theme-info" class="card-caption">現在のテーマ：未設定</p>
+
           <div class="field-row">
             <input id="theme-input" type="text" class="input-text flex-1" placeholder="例）連結会計の基礎 / 国際政治学1 など" />
             <button id="btn-save-theme" class="btn ghost">テーマを保存</button>
           </div>
         </div>
 
-
         <!-- 想定投票人数 -->
         <div class="card">
           <h2 class="card-title">想定投票人数</h2>
-          <p id="max-participants-info" class="card-caption">
-            想定人数は未設定です（0人）
-          </p>
+          <p id="max-participants-info" class="card-caption">想定人数は未設定です（0人）</p>
+
           <div class="field-row">
             <input id="max-participants-input" type="number" min="0" max="100" class="input-text small" placeholder="0〜100" />
             <button id="btn-save-max" class="btn ghost">人数を保存</button>
           </div>
         </div>
-
 
         <!-- セッションリセット -->
         <div class="card danger">
@@ -84,32 +74,26 @@
           <button id="btn-reset" class="btn danger wide">投票データをリセット</button>
         </div>
 
-
         <!-- 完全リセット -->
         <div class="card danger">
           <h2 class="card-title">全投票データを完全リセット</h2>
-          <p class="card-caption">
-            現在セッション・過去3セッションのグラフをすべて削除します。
-          </p>
+          <p class="card-caption">現在セッション・過去3セッションのグラフをすべて削除します。</p>
           <button id="btn-reset-all" class="btn danger ghost">全投票データを完全リセット</button>
         </div>
 
-
       </section>
-
 
       <!-- 右カラム -->
       <section class="admin-dashboard">
 
-
         <!-- サマリー -->
         <div class="summary-grid">
+
           <div class="summary-card">
             <span class="label">理解できた</span>
             <span id="num-understood" class="value">0</span>
             <span class="unit">票</span>
           </div>
-
 
           <div class="summary-card">
             <span class="label">あまり理解できなかった</span>
@@ -117,43 +101,36 @@
             <span class="unit">票</span>
           </div>
 
-
           <div class="summary-card">
             <span class="label">合計</span>
             <span id="num-total" class="value">0</span>
             <span class="unit">票</span>
           </div>
 
-
           <div class="summary-card accent">
             <span class="label">理解率</span>
             <span id="rate-understood" class="value">0%</span>
           </div>
+
         </div>
 
-
-        <!-- 現在セッション ★ 高さ1200px -->
+        <!-- 現在セッション（大グラフ） -->
         <div class="card large">
           <div class="card-header-row">
             <h2 class="card-title">理解度(理解 − 不理解) の推移</h2>
             <span class="card-caption">リアルタイム更新</span>
           </div>
-
-
           <canvas id="sineCanvas" width="1600" height="1200"></canvas>
         </div>
 
-
-        <!-- 過去セッション（高さ 400px × 3つ） -->
+        <!-- 過去セッション 3つ -->
         <div class="card">
           <div class="card-header-row">
             <h2 class="card-title">過去セッションの理解度推移</h2>
             <span class="card-caption">最近3回分まで保存</span>
           </div>
 
-
           <div class="prev-session-wrap">
-
 
             <div class="prev-session-block">
               <p class="card-caption">
@@ -163,7 +140,6 @@
               <canvas id="prevChart1" width="1600" height="400"></canvas>
             </div>
 
-
             <div class="prev-session-block">
               <p class="card-caption">
                 <span id="prevChart-note2">2つ前のセッション：まだグラフはありません。</span>
@@ -171,7 +147,6 @@
               </p>
               <canvas id="prevChart2" width="1600" height="400"></canvas>
             </div>
-
 
             <div class="prev-session-block">
               <p class="card-caption">
@@ -181,22 +156,19 @@
               <canvas id="prevChart3" width="1600" height="400"></canvas>
             </div>
 
-
           </div>
         </div>
 
-
-        <!-- 連結グラフ ★ 高さ1200px -->
+        <!-- 🔵 連結グラフ（点付き最終理解度を表示） -->
         <div class="card">
           <div class="card-header-row">
             <h2 class="card-title">セッション1〜3 連結グラフ</h2>
             <span class="card-caption">前セッション終点と次セッション始点がつながる</span>
           </div>
 
-
+          <!-- ★ admin.js が描画する -->
           <canvas id="sessionChain" width="1600" height="1200"></canvas>
         </div>
-
 
         <!-- コメント -->
         <div class="card">
@@ -205,12 +177,11 @@
           <div id="comment-list" class="comment-list"></div>
         </div>
 
-
       </section>
     </main>
   </div>
 
-
+  <!-- JS 読み込み -->
   <script src="admin.js"></script>
 </body>
 </html>
