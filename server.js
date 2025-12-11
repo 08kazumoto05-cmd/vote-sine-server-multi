@@ -1,5 +1,5 @@
 // server.js
-// 投票結果＋コメント＋履歴（理解度グラフ用）＋秘密キー付きURL制限
+// 投票結果＋コメント＋履歴（興味度グラフ用）＋秘密キー付きURL制限
 
 const express = require("express");
 const path = require("path");
@@ -15,31 +15,35 @@ const ACCESS_KEY = "class2025-secret";
 const store = {
   understood: 0,
   notUnderstood: 0,
-  comments: [],       // { choice, text, ts }
-  history: [],        // { ts, understood, notUnderstood }
-  theme: ""
+  comments: [],          // { choice, text, ts }
+  history: [],           // { ts, understood, notUnderstood }
+  theme: ""              // アンケートテーマ
 };
 
-// 管理者が設定する想定投票人数
+// 管理者が設定する想定投票人数（0〜100）
 let adminSettings = {
   maxParticipants: 0
 };
 
 app.use(bodyParser.json());
 
-// 静的ファイル
+// 静的ファイル（/public 以下）
 app.use(express.static(path.join(__dirname, "public")));
 
 // ===== アクセスキー制御 =====
+
+// 投票ページ用ミドルウェア
 function checkAccessKey(req, res, next) {
   const key = req.query.key;
   if (key !== ACCESS_KEY) {
-    return res.status(403).send("アクセス権がありません（URLが正しくありません）。");
+    return res
+      .status(403)
+      .send("アクセス権がありません（URLが正しくありません）。");
   }
   next();
 }
 
-// ルートで投票ページへリダイレクト
+// ルートに来たら投票ページへリダイレクト
 app.get("/", (req, res) => {
   res.redirect(`/vote.html?key=${ACCESS_KEY}`);
 });
@@ -49,102 +53,98 @@ app.get("/vote.html", checkAccessKey, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "vote.html"));
 });
 
-// 管理画面
+// 管理画面（管理パスワードで保護する想定。URL制限なし）
 app.get("/admin.html", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
 // ===== API =====
 
-// ------------------------
 // 投票 API
-// ------------------------
-function recordVote(choice, commentText) {
-  if (choice === "understood") {
-    store.understood++;
-  } else if (choice === "not-understood") {
-    store.notUnderstood++;
-  } else {
-    throw new Error("invalid choice");
+app.post("/api/vote", (req, res) => {
+  try {
+    const { choice, comment } = req.body || {};
+
+    if (choice === "understood") {
+      store.understood += 1;
+    } else if (choice === "not-understood") {
+      store.notUnderstood += 1;
+    } else {
+      return res.status(400).json({ success: false, error: "invalid choice" });
+    }
+
+    const now = new Date().toISOString();
+
+    // コメント保存（任意）
+    if (comment && typeof comment === "string" && comment.trim().length > 0) {
+      store.comments.push({
+        choice,
+        text: comment.trim(),
+        ts: now
+      });
+    }
+
+    // 履歴に「累計値」を記録（管理画面のグラフ用）
+    store.history.push({
+      ts: now,
+      understood: store.understood,
+      notUnderstood: store.notUnderstood
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, error: "internal error" });
   }
+});
 
-  const now = new Date().toISOString();
+// ★ コメント単体送信用 API（client.js の /api/comment 用）
+// POST /api/comment  { text: "～～～" }
+app.post("/api/comment", (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || typeof text !== "string" || text.trim().length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, error: "empty comment" });
+    }
 
-  if (commentText && typeof commentText === "string" && commentText.trim()) {
+    const now = new Date().toISOString();
+
+    // choice は「コメントのみ」の場合は null にしておく
     store.comments.push({
-      choice,
-      text: commentText.trim(),
+      choice: null,
+      text: text.trim(),
       ts: now
     });
-  }
 
-  store.history.push({
-    ts: now,
-    understood: store.understood,
-    notUnderstood: store.notUnderstood
-  });
-}
-
-app.post("/api/vote/understood", (req, res) => {
-  try {
-    recordVote("understood", null);
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ success: false });
+    return res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    return res
+      .status(500)
+      .json({ success: false, error: "internal error" });
   }
 });
 
-app.post("/api/vote/not-understood", (req, res) => {
-  try {
-    recordVote("not-understood", null);
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ success: false });
-  }
-});
-
-// コメント専用 API
-app.post("/api/comment", (req, res) => {
-  const { text } = req.body || {};
-  try {
-    recordVote("comment-only", text);
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ success: false });
-  }
-});
-
-// 結果取得
-app.get("/api/results", (req, res) => {
-  const total = store.understood + store.notUnderstood;
-  const rate = total > 0 ? store.understood / total : 0;
-
-  res.json({
-    understood: store.understood,
-    notUnderstood: store.notUnderstood,
-    total,
-    rateUnderstood: rate,
-    comments: store.comments.slice(-100),
-    history: store.history.slice(-100),
-    maxParticipants: adminSettings.maxParticipants,
-    theme: store.theme
-  });
-});
-
-// 想定人数保存
+// 管理者用：想定投票人数(0〜100) 更新
 app.post("/api/admin/max-participants", (req, res) => {
-  const { maxParticipants } = req.body;
+  const { maxParticipants } = req.body || {};
   const num = Number(maxParticipants);
 
   if (!Number.isFinite(num) || num < 0 || num > 100) {
-    return res.status(400).json({ success: false });
+    return res
+      .status(400)
+      .json({ success: false, error: "maxParticipants must be 0–100" });
   }
+
   adminSettings.maxParticipants = num;
   res.json({ success: true, maxParticipants: num });
 });
 
-// 現在セッションだけリセット
-app.post("/api/admin/reset", (_, res) => {
+// 管理者用：投票データをリセット（現在セッションのみ）
+app.post("/api/admin/reset", (req, res) => {
+  // 票・コメント・履歴のみ消す（想定人数とテーマは残す）
   store.understood = 0;
   store.notUnderstood = 0;
   store.comments = [];
@@ -152,29 +152,64 @@ app.post("/api/admin/reset", (_, res) => {
   res.json({ success: true });
 });
 
-// 全データ完全リセット
-app.post("/api/admin/reset-all", (_, res) => {
+// ★ 管理者用：全投票データを完全リセット
+//   現在セッション＋過去セッション用のデータをすべてクリアする想定
+app.post("/api/admin/reset-all", (req, res) => {
+  // 票・コメント・履歴をクリア
   store.understood = 0;
   store.notUnderstood = 0;
   store.comments = [];
   store.history = [];
   store.theme = "";
+
+  // 想定人数もゼロに戻す
   adminSettings.maxParticipants = 0;
+
   res.json({ success: true });
 });
 
-// テーマ保存
+// 結果取得 API（管理画面用）
+app.get("/api/results", (req, res) => {
+  const total = store.understood + store.notUnderstood;
+  const rateUnderstood =
+    total > 0 ? store.understood / total : 0;
+
+  const comments = store.comments.slice(-100);
+  const history = store.history.slice(-200);
+
+  res.json({
+    understood: store.understood,
+    notUnderstood: store.notUnderstood,
+    total,
+    rateUnderstood,
+    comments,
+    history,
+    maxParticipants: adminSettings.maxParticipants,
+    theme: store.theme
+  });
+});
+
+// 管理者用：アンケートテーマ設定
 app.post("/api/admin/theme", (req, res) => {
-  store.theme = (req.body.theme || "").trim();
+  const { theme } = req.body || {};
+  if (typeof theme !== "string") {
+    return res
+      .status(400)
+      .json({ success: false, error: "theme must be a string" });
+  }
+  store.theme = theme.trim();
   res.json({ success: true, theme: store.theme });
 });
 
-// テーマ取得
-app.get("/api/theme", (_, res) => {
+// 投票者・管理者共通：テーマ取得
+app.get("/api/theme", (req, res) => {
   res.json({ theme: store.theme });
 });
 
-// ===== 起動 =====
+// ===== サーバー起動 =====
 app.listen(PORT, () => {
-  console.log("Server started on port", PORT);
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(
+    `投票ページURLの例: http://localhost:${PORT}/vote.html?key=${ACCESS_KEY}`
+  );
 });
