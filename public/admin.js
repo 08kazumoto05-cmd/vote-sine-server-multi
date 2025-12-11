@@ -16,33 +16,33 @@
 const ADMIN_PASSWORD = "cpa1968";
 
 // ==== DOM取得 ====
-const lockScreen    = document.getElementById("lock-screen");
-const adminContent  = document.getElementById("admin-content");
-const pwInput       = document.getElementById("admin-password");
-const btnUnlock     = document.getElementById("btn-unlock");
-const lockMsg       = document.getElementById("lock-message");
+const lockScreen = document.getElementById("lock-screen");
+const adminContent = document.getElementById("admin-content");
+const pwInput = document.getElementById("admin-password");
+const btnUnlock = document.getElementById("btn-unlock");
+const lockMsg = document.getElementById("lock-message");
 
-const numUnderstood    = document.getElementById("num-understood");
+const numUnderstood = document.getElementById("num-understood");
 const numNotUnderstood = document.getElementById("num-not-understood");
-const numTotal         = document.getElementById("num-total");
-const rateUnderstood   = document.getElementById("rate-understood");
+const numTotal = document.getElementById("num-total");
+const rateUnderstood = document.getElementById("rate-understood");
 
 const canvas = document.getElementById("sineCanvas");
-const ctx    = canvas.getContext("2d");
+const ctx = canvas.getContext("2d");
 
-const commentList   = document.getElementById("comment-list");
+const commentList = document.getElementById("comment-list");
 const timeIndicator = document.getElementById("time-indicator");
 
-const maxInput   = document.getElementById("max-participants-input");
+const maxInput = document.getElementById("max-participants-input");
 const btnSaveMax = document.getElementById("btn-save-max");
-const maxInfo    = document.getElementById("max-participants-info");
+const maxInfo = document.getElementById("max-participants-info");
 
-const btnReset    = document.getElementById("btn-reset");
+const btnReset = document.getElementById("btn-reset");
 const btnResetAll = document.getElementById("btn-reset-all");
 
-const themeInput   = document.getElementById("theme-input");
+const themeInput = document.getElementById("theme-input");
 const btnSaveTheme = document.getElementById("btn-save-theme");
-const themeInfo    = document.getElementById("theme-info");
+const themeInfo = document.getElementById("theme-info");
 
 // 過去3セッション用キャンバス
 const prevCanvases = [
@@ -110,16 +110,16 @@ async function fetchResults() {
 
     const data = await res.json();
 
-    const u     = data.understood || 0;
-    const n     = data.notUnderstood || 0;
+    const u = data.understood || 0;
+    const n = data.notUnderstood || 0;
     const total = u + n;
-    const maxP  = data.maxParticipants ?? 0;
+    const maxP = data.maxParticipants ?? 0;
     const theme = data.theme || "";
 
     // 票数表示
-    numUnderstood.textContent    = u;
+    numUnderstood.textContent = u;
     numNotUnderstood.textContent = n;
-    numTotal.textContent         = total;
+    numTotal.textContent = total;
 
     // 表示用興味度（％）※ここが「最終興味度」に使われる
     const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
@@ -324,11 +324,11 @@ function drawLineChart() {
 // ・右横に「最終興味度：◯◯％」を表示
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
-    const session   = prevSessions[i];
-    const c         = prevCanvases[i];
-    const note      = prevNotes[i];
+    const session = prevSessions[i];
+    const c = prevCanvases[i];
+    const note = prevNotes[i];
     const rateLabel = prevRateLabels[i];
-    const pctx      = prevCtxs[i];
+    const pctx = prevCtxs[i];
 
     if (!c || !pctx) continue;
 
@@ -348,7 +348,7 @@ function drawPrevSessions() {
       continue;
     }
 
-    const hist  = session.points;
+    const hist = session.points;
     const color = session.color;
 
     if (note) {
@@ -391,7 +391,7 @@ function drawPrevSessions() {
       const y = valueToY(v, h, B, plotH);
 
       pctx.strokeStyle = v === 0 ? "#FFFFFF" : "#666666";
-      pctx.lineWidth   = v === 0 ? 4 : 2;
+      pctx.lineWidth = v === 0 ? 4 : 2;
       pctx.setLineDash(v === 0 ? [] : [10, 10]);
 
       pctx.beginPath();
@@ -427,9 +427,9 @@ function drawPrevSessions() {
 
     hist.forEach((p, idx) => {
       const displayRate = idx === 0 ? 0 : p.rate;
-      const clipped     = Math.max(0, Math.min(100, displayRate));
-      const x           = L + idx * stepX;
-      const y           = valueToY(clipped, h, B, plotH);
+      const clipped = Math.max(0, Math.min(100, displayRate));
+      const x = L + idx * stepX;
+      const y = valueToY(clipped, h, B, plotH);
       if (idx === 0) pctx.moveTo(x, y);
       else pctx.lineTo(x, y);
     });
@@ -530,7 +530,7 @@ function drawSessionChain() {
     const y = valueToY(v, h, B, plotH);
 
     sessionChainCtx.strokeStyle = v === 0 ? "#FFFFFF" : "#666666";
-    sessionChainCtx.lineWidth   = v === 0 ? 6 : 3;
+    sessionChainCtx.lineWidth = v === 0 ? 6 : 3;
     sessionChainCtx.setLineDash(v === 0 ? [] : [20, 20]);
 
     sessionChainCtx.beginPath();
@@ -759,13 +759,13 @@ if (btnReset) {
 
       // 現在セッションを過去セッションに保存（先頭に追加）
       if (history.length > 0) {
-        const rateText  = rateUnderstood.textContent || "0%";
-        const numeric   = parseInt(rateText.replace("%", ""), 10) || 0;
+        const rateText = rateUnderstood.textContent || "0%";
+        const numeric = parseInt(rateText.replace("%", ""), 10) || 0;
         const finalRate = Math.max(0, Math.min(100, numeric));
 
         const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
         prevSessions.unshift({
-          color:  currentColor,
+          color: currentColor,
           points: copy,
           finalRate
         });
@@ -805,9 +805,9 @@ if (btnResetAll) {
       const res = await fetch("/api/admin/reset-all", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset all");
 
-      history      = [];
+      history = [];
       prevSessions = [];
-      resetCount   = 0;
+      resetCount = 0;
 
       drawPrevSessions();
       drawSessionChain();
