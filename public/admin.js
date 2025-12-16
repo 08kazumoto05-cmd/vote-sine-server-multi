@@ -14,6 +14,7 @@
 // ・各セッション最終到達点に同色の点＋％ラベル
 //
 // ★過去セッション表示は「昇順（新しい→古い）」＝保存順（0番が最新）で表示
+// ★「1つ前」ではなく「◯回目のリセットセッション」で表示する
 //
 // ==== パスワード ====
 // 管理パスワード: cpa1968
@@ -80,7 +81,9 @@ let history = [];
 
 // 過去セッション（最大4つ）
 // prevSessions は「新しい順（0番が最新）」で保存される（unshift）
-// { color, points:[{ts,rate}], finalRate }
+//
+// 追加：resetNo（何回目のリセットで保存したセッションか）
+// { resetNo, color, points:[{ts,rate}], finalRate }
 let prevSessions = [];
 
 let resetCount = 0;
@@ -284,15 +287,16 @@ function drawLineChart() {
 
 // ==== 過去セッションのグラフ描画 ====
 // ★昇順（新しい→古い）：prevSessionsの保存順（0番が最新）のまま表示
+// ★ラベルを「◯回目のリセットセッション」にする
 function drawPrevSessions() {
   const maxSlots = prevCanvases.length; // 4
   const sessionsForDisplay = prevSessions.slice(0, maxSlots); // ★ reverseしない
 
-  const makeLabel = (slotIndex) => {
-    if (slotIndex === 0) return "1つ前";
-    if (slotIndex === 1) return "2つ前";
-    if (slotIndex === 2) return "3つ前";
-    return "4つ前";
+  const makeHeader = (session, slotIndex) => {
+    const no = Number(session?.resetNo ?? 0);
+    if (no > 0) return `${no}回目のリセットセッション`;
+    // 旧データ互換（resetNoが無い場合）
+    return `リセットセッション`;
   };
 
   for (let i = 0; i < maxSlots; i++) {
@@ -311,15 +315,16 @@ function drawPrevSessions() {
     pctx.fillRect(0, 0, w, h);
 
     if (!session || !session.points || session.points.length === 0) {
-      if (note) note.textContent = `${makeLabel(i)}のセッション：まだグラフはありません。`;
+      if (note) note.textContent = `まだセッションが保存されていません。`;
       if (rateLabel) rateLabel.textContent = "";
       continue;
     }
 
+    const header = makeHeader(session, i);
     const hist = session.points;
     const color = session.color || "#4fc3f7";
 
-    if (note) note.textContent = `${makeLabel(i)}のセッション：興味率の推移（0〜100％）`;
+    if (note) note.textContent = `${header}：興味率の推移（0〜100％）`;
 
     if (rateLabel) {
       const lastRate = Math.max(0, Math.min(100, Number(session.finalRate ?? 0)));
@@ -649,7 +654,9 @@ if (btnReset) {
         const lastRate = Math.max(0, Math.min(100, history[history.length - 1].rate));
         const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
 
+        // ★ resetNo を保存（何回目のリセットか）
         prevSessions.unshift({
+          resetNo: resetCount + 1,
           color: currentColor,
           points: copy,
           finalRate: lastRate
