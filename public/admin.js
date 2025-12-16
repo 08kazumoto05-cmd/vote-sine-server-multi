@@ -1,5 +1,5 @@
 // ===============================
-// admin.js（興味率：カード/現在/過去/連結 全部同一ロジック）
+// admin.js（興味率：カード/現在/過去/連結 全部同一ロジック + セッション名&コメント保存）
 // ===============================
 //
 // 興味がある = +1
@@ -8,7 +8,7 @@
 // 0〜100 にクリップ
 //
 // ・各セッションのグラフは 1点目だけ0として描画（0スタート演出）
-// ・過去セッションは最大3件保存
+// ・過去セッションは最大3件保存（セッション名・コメントも保存）
 // ・連結グラフ：0% → セッション1最終興味率 → セッション2 → セッション3
 // ・各セッション最終到達点に同色の点＋％ラベル
 //
@@ -24,10 +24,10 @@ const pwInput = document.getElementById("admin-password");
 const btnUnlock = document.getElementById("btn-unlock");
 const lockMsg = document.getElementById("lock-message");
 
-const numUnderstood = document.getElementById("num-understood");         // 興味がある
+const numUnderstood = document.getElementById("num-understood"); // 興味がある
 const numNotUnderstood = document.getElementById("num-not-understood"); // 興味がない
 const numTotal = document.getElementById("num-total");
-const rateUnderstood = document.getElementById("rate-understood");       // 興味率(カード)
+const rateUnderstood = document.getElementById("rate-understood"); // 興味率(カード)
 
 const canvas = document.getElementById("sineCanvas");
 const ctx = canvas.getContext("2d");
@@ -73,13 +73,16 @@ const sessionChainCtx = sessionChainCanvas ? sessionChainCanvas.getContext("2d")
 let history = [];
 
 // 過去セッション（最大3つ）
-// { color, points:[{ts,rate}], finalRate }
+// { name, savedAt, color, points:[{ts,rate}], finalRate, comments:[{ts,choice,text}] }
 let prevSessions = [];
 
 let resetCount = 0;
 
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a"];
 let animationStarted = false;
+
+// 最新のコメントを「リセット前に保存」するため退避
+let latestComments = []; // [{ts, choice, text}, ...]
 
 // ==== ユーティリティ ====
 // 現在セッションの色
@@ -103,6 +106,16 @@ function calcInterestRate(u, n, maxP) {
   return rate;
 }
 
+// セッション名のデフォルト生成
+function defaultSessionName() {
+  const d = new Date();
+  const pad = x => String(x).padStart(2, "0");
+  const stamp =
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `セッション${resetCount + 1}（${stamp}）`;
+}
+
 // ==== 結果取得 ====
 async function fetchResults() {
   try {
@@ -111,8 +124,8 @@ async function fetchResults() {
 
     const data = await res.json();
 
-    const u = data.understood || 0;         // 興味がある
-    const n = data.notUnderstood || 0;      // 興味がない
+    const u = data.understood || 0; // 興味がある
+    const n = data.notUnderstood || 0; // 興味がない
     const total = u + n;
     const maxP = data.maxParticipants ?? 0;
     const theme = data.theme || "";
@@ -138,8 +151,9 @@ async function fetchResults() {
     themeInfo.textContent = theme ? `現在のテーマ：${theme}` : "現在のテーマ：未設定";
     if (document.activeElement !== themeInput) themeInput.value = theme;
 
-    // コメント
-    renderComments(data.comments || []);
+    // コメント（表示用 + 保存用に退避）
+    latestComments = Array.isArray(data.comments) ? data.comments : [];
+    renderComments(latestComments);
 
     // 履歴更新（rateが計算できるときだけ）
     addRatePoint(rate);
@@ -304,7 +318,9 @@ function drawPrevSessions() {
 
     if (note) {
       const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : "3つ前";
-      note.textContent = `${label}のセッション：興味率の推移（0〜100％）`;
+      const name = session.name ? `【${session.name}】` : "";
+      const cnum = Array.isArray(session.comments) ? session.comments.length : 0;
+      note.textContent = `${label}のセッション：${name} 興味率の推移（コメント${cnum}件）`;
     }
 
     if (rateLabel) {
@@ -466,7 +482,8 @@ function drawSessionChain() {
     const y = valueToY(pt.rate, h, B, plotH);
 
     if (idx === 0) {
-      lastX = x; lastY = y;
+      lastX = x;
+      lastY = y;
       return;
     }
 
@@ -477,7 +494,8 @@ function drawSessionChain() {
     sessionChainCtx.lineTo(x, y);
     sessionChainCtx.stroke();
 
-    lastX = x; lastY = y;
+    lastX = x;
+    lastY = y;
   });
 
   const pointRadius = 10;
@@ -511,7 +529,7 @@ function drawSessionChain() {
   sessionChainCtx.fillText("セッション1→2→3 最終興味率 連結グラフ", L, 60);
 }
 
-// ==== コメント表示 ====
+// ==== コメント表示（現在） ====
 function renderComments(comments) {
   commentList.innerHTML = "";
 
@@ -536,7 +554,11 @@ function renderComments(comments) {
 
     const time = document.createElement("span");
     let timeText = "";
-    try { timeText = new Date(c.ts).toLocaleString("ja-JP"); } catch { timeText = c.ts || ""; }
+    try {
+      timeText = new Date(c.ts).toLocaleString("ja-JP");
+    } catch {
+      timeText = c.ts || "";
+    }
     time.textContent = timeText;
 
     meta.appendChild(tag);
@@ -606,23 +628,46 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
-// finalRate は「カードの％」ではなく、「履歴の最後（=同一計算式）」を保存
+// ・セッション名入力
+// ・history + finalRate + comments（最新取得分）を prevSessions に保存
+// ・その後にサーバー reset を呼ぶ
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
-    const ok = confirm("現在セッションの票・コメント・グラフをリセットします。\n本当に実行しますか？");
+    const ok = confirm(
+      "現在セッションの票・コメント・グラフをリセットします。\n" +
+      "（この操作の前に、セッション名とコメントを「過去セッション」に保存します）\n" +
+      "本当に実行しますか？"
+    );
     if (!ok) return;
 
     try {
       const currentColor = getCurrentColor();
 
-      if (history.length > 0) {
-        const lastRate = Math.max(0, Math.min(100, history[history.length - 1].rate));
-        const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
+      // セッション名を入力（空ならデフォルト）
+      const inputName = prompt("保存するセッション名を入力してください（空なら自動命名）", defaultSessionName());
+      const sessionName = (inputName || "").trim() || defaultSessionName();
+
+      // 保存（グラフが空でも、コメントだけでも保存したいなら条件を緩める）
+      const hasGraph = history.length > 0;
+      const hasComments = Array.isArray(latestComments) && latestComments.length > 0;
+
+      if (hasGraph || hasComments) {
+        const lastRate = hasGraph
+          ? Math.max(0, Math.min(100, history[history.length - 1].rate))
+          : 0;
+
+        const copyPoints = hasGraph ? history.map(p => ({ ts: p.ts, rate: p.rate })) : [];
+        const copyComments = hasComments
+          ? latestComments.map(c => ({ ts: c.ts, choice: c.choice, text: c.text }))
+          : [];
 
         prevSessions.unshift({
+          name: sessionName,
+          savedAt: Date.now(),
           color: currentColor,
-          points: copy,
-          finalRate: lastRate
+          points: copyPoints,
+          finalRate: lastRate,
+          comments: copyComments
         });
 
         if (prevSessions.length > 3) prevSessions = prevSessions.slice(0, 3);
@@ -630,6 +675,7 @@ if (btnReset) {
         drawSessionChain();
       }
 
+      // サーバー側リセット（サーバー仕様によりコメントが消える場合あり）
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
@@ -637,7 +683,7 @@ if (btnReset) {
       history = [];
 
       await fetchResults();
-      alert("投票データをリセットしました。");
+      alert("投票データをリセットしました。（過去セッションにセッション名・コメントを保存済み）");
     } catch (e) {
       console.error(e);
       alert("リセットに失敗しました。時間をおいて再度お試しください。");
@@ -648,7 +694,9 @@ if (btnReset) {
 // ==== 全投票データ完全リセット ====
 if (btnResetAll) {
   btnResetAll.addEventListener("click", async () => {
-    const ok = confirm("現在セッション＋過去3セッションのグラフをすべて削除します。\n本当に完全リセットしますか？");
+    const ok = confirm(
+      "現在セッション＋過去3セッションのグラフ/保存データをすべて削除します。\n本当に完全リセットしますか？"
+    );
     if (!ok) return;
 
     try {
@@ -657,6 +705,7 @@ if (btnResetAll) {
 
       history = [];
       prevSessions = [];
+      latestComments = [];
       resetCount = 0;
 
       drawPrevSessions();
