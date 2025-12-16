@@ -13,6 +13,8 @@
 // ・4つ目の色は黄色
 // ・各セッション最終到達点に同色の点＋％ラベル
 //
+// ★過去セッション表示は「降順（古い→新しい）」に変更
+//
 // ==== パスワード ====
 // 管理パスワード: cpa1968
 
@@ -77,6 +79,7 @@ const sessionChainCtx = sessionChainCanvas ? sessionChainCanvas.getContext("2d")
 let history = [];
 
 // 過去セッション（最大4つ）
+// prevSessions は「新しい順（0番が最新）」で保存される（unshift）
 // { color, points:[{ts,rate}], finalRate }
 let prevSessions = [];
 
@@ -280,10 +283,26 @@ function drawLineChart() {
 }
 
 // ==== 過去セッションのグラフ描画 ====
-// ★ 表示も4枠まで（HTMLに無い枠は自動スキップ）
+// ★「降順（古い→新しい）」で表示する
 function drawPrevSessions() {
-  for (let i = 0; i < 4; i++) {
-    const session = prevSessions[i];
+  // 画面にある枠数ぶん（null枠も含むが安全にスキップする）
+  const maxSlots = prevCanvases.length; // 4
+
+  // prevSessions(新しい順) -> 表示用に逆順(古い→新しい)
+  const sessionsForDisplay = prevSessions.slice(0, maxSlots).slice().reverse();
+
+  // 「古い→新しい」表示なので、各枠のラベルはこうする：
+  // 一番右(最後)が「1つ前」、その左が「2つ前」…という意味になる
+  const makeLabel = (slotIndex) => {
+    const fromLatest = (maxSlots - 1) - slotIndex; // 0:一番新しい(=1つ前), 1:2つ前...
+    if (fromLatest === 0) return "1つ前";
+    if (fromLatest === 1) return "2つ前";
+    if (fromLatest === 2) return "3つ前";
+    return "4つ前";
+  };
+
+  for (let i = 0; i < maxSlots; i++) {
+    const session = sessionsForDisplay[i];
     const c = prevCanvases[i];
     const note = prevNotes[i];
     const rateLabel = prevRateLabels[i];
@@ -299,10 +318,7 @@ function drawPrevSessions() {
     pctx.fillRect(0, 0, w, h);
 
     if (!session || !session.points || session.points.length === 0) {
-      if (note) {
-        const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : i === 2 ? "3つ前" : "4つ前";
-        note.textContent = `${label}のセッション：まだグラフはありません。`;
-      }
+      if (note) note.textContent = `${makeLabel(i)}のセッション：まだグラフはありません。`;
       if (rateLabel) rateLabel.textContent = "";
       continue;
     }
@@ -310,10 +326,7 @@ function drawPrevSessions() {
     const hist = session.points;
     const color = session.color || "#4fc3f7";
 
-    if (note) {
-      const label = i === 0 ? "1つ前" : i === 1 ? "2つ前" : i === 2 ? "3つ前" : "4つ前";
-      note.textContent = `${label}のセッション：興味率の推移（0〜100％）`;
-    }
+    if (note) note.textContent = `${makeLabel(i)}のセッション：興味率の推移（0〜100％）`;
 
     if (rateLabel) {
       const lastRate = Math.max(0, Math.min(100, Number(session.finalRate ?? 0)));
