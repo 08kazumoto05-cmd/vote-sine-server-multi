@@ -1,14 +1,24 @@
-// vote.js（興味度アンケート用・API完全対応版）
-// ・投票ボタン2つとも confirm で再確認
-// ・サーバーの /api/vote に { choice, comment } をPOSTする
+// vote.js（興味度アンケート用・API対応版：3択）
+// ・投票ボタン3つ（気になる / 普通 / 気にならない）
+// ・confirm で再確認
+// ・/api/vote に { choice, comment } をPOST
+//
+// choice 仕様（このJS側）
+// - interested      : 気になる（+1）
+// - neutral         : 普通（ 0）
+// - not-interested  : 気にならない（-1）
+//
+// ※サーバ側がこのchoice文字列を受け取れる実装になっている必要があります
 
 document.addEventListener("DOMContentLoaded", () => {
-  const btnUnderstood    = document.getElementById("btn-understood");      // 「興味がある」
-  const btnNotUnderstood = document.getElementById("btn-not-understood");  // 「あまり興味がない」
+  const btnInterested    = document.getElementById("btn-interested");      // 「気になる」
+  const btnNeutral       = document.getElementById("btn-neutral");         // 「普通」
+  const btnNotInterested = document.getElementById("btn-not-interested");  // 「気にならない」
   const btnSendComment   = document.getElementById("btn-send-comment");    // コメントのみ送信
-  const message          = document.getElementById("message");
-  const commentInput     = document.getElementById("comment-input");
-  const themeTitle       = document.getElementById("theme-title");
+
+  const message      = document.getElementById("message");
+  const commentInput = document.getElementById("comment-input");
+  const themeTitle   = document.getElementById("theme-title");
 
   // -----------------------------
   // メッセージ表示
@@ -23,12 +33,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   async function fetchTheme() {
     try {
-      const res = await fetch("/api/results");
+      const res = await fetch("/api/results", { cache: "no-store" });
       if (!res.ok) throw new Error("failed to fetch theme");
       const data = await res.json();
-      if (data.theme && themeTitle) {
-        themeTitle.textContent = data.theme;
-      }
+      if (data.theme && themeTitle) themeTitle.textContent = data.theme;
     } catch (e) {
       console.error(e);
     }
@@ -36,67 +44,73 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchTheme();
 
   // -----------------------------
-  // 「興味がある」ボタン
+  // 共通：投票送信
   // -----------------------------
-  if (btnUnderstood) {
-    btnUnderstood.addEventListener("click", async () => {
-      // ★ 再確認
-      const ok = confirm("本当に『興味がある』で回答しますか？");
-      if (!ok) return;
+  async function postVote(choice, confirmText, successText) {
+    const ok = confirm(confirmText);
+    if (!ok) return;
 
-      try {
-        const res = await fetch("/api/vote", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            choice: "understood",
-            comment: commentInput.value.trim()
-          })
-        });
+    try {
+      const res = await fetch("/api/vote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          choice,
+          comment: (commentInput?.value || "").trim()
+        })
+      });
 
-        if (!res.ok) throw new Error("vote failed");
+      if (!res.ok) throw new Error("vote failed");
 
-        setMessage("『興味がある』で回答しました。ありがとうございました！");
-        commentInput.value = "";
-      } catch (e) {
-        console.error(e);
-        setMessage("送信エラーが発生しました。");
-      }
+      setMessage(successText);
+      if (commentInput) commentInput.value = "";
+    } catch (e) {
+      console.error(e);
+      setMessage("送信エラーが発生しました。");
+    }
+  }
+
+  // -----------------------------
+  // 「気になる」
+  // -----------------------------
+  if (btnInterested) {
+    btnInterested.addEventListener("click", async () => {
+      await postVote(
+        "interested",
+        "本当に『気になる』で回答しますか？",
+        "『気になる』で回答しました。ありがとうございました！"
+      );
     });
   }
 
   // -----------------------------
-  // 「あまり興味がない」ボタン
+  // 「普通」
   // -----------------------------
-  if (btnNotUnderstood) {
-    btnNotUnderstood.addEventListener("click", async () => {
-      // ★ こちらも再確認を追加
-      const ok = confirm("本当に『あまり興味がない』で回答しますか？");
-      if (!ok) return;
-
-      try {
-        const res = await fetch("/api/vote", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            choice: "not-understood",
-            comment: commentInput.value.trim()
-          })
-        });
-
-        if (!res.ok) throw new Error("vote failed");
-
-        setMessage("『あまり興味がない』で回答しました。ありがとうございました！");
-        commentInput.value = "";
-      } catch (e) {
-        console.error(e);
-        setMessage("送信エラーが発生しました。");
-      }
+  if (btnNeutral) {
+    btnNeutral.addEventListener("click", async () => {
+      await postVote(
+        "neutral",
+        "本当に『普通』で回答しますか？",
+        "『普通』で回答しました。ありがとうございました！"
+      );
     });
   }
 
   // -----------------------------
-  // コメントのみ送信ボタン
+  // 「気にならない」
+  // -----------------------------
+  if (btnNotInterested) {
+    btnNotInterested.addEventListener("click", async () => {
+      await postVote(
+        "not-interested",
+        "本当に『気にならない』で回答しますか？",
+        "『気にならない』で回答しました。ありがとうございました！"
+      );
+    });
+  }
+
+  // -----------------------------
+  // コメントのみ送信
   // -----------------------------
   if (btnSendComment && commentInput) {
     btnSendComment.addEventListener("click", async () => {
@@ -111,8 +125,8 @@ document.addEventListener("DOMContentLoaded", () => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            // サーバー側で choice 必須なのでダミーで "understood" を送る
-            choice: "understood",
+            // choice 必須の想定なので、0扱いになる "neutral" をダミーで送る
+            choice: "neutral",
             comment: text
           })
         });

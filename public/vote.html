@@ -22,14 +22,18 @@
       <strong>あなたの興味の度合い</strong> を教えてください。
     </p>
 
-    <!-- 投票ボタン -->
+    <!-- 投票ボタン（★3つに変更） -->
     <div class="vote-box">
-      <button id="btn-understood" class="btn understood">
-        興味がある
+      <button id="btn-interested" class="btn understood">
+        気になる
       </button>
 
-      <button id="btn-not-understood" class="btn not-understood">
-        あまり興味がない
+      <button id="btn-neutral" class="btn ghost">
+        普通
+      </button>
+
+      <button id="btn-not-interested" class="btn not-understood">
+        気にならない
       </button>
     </div>
 
@@ -46,7 +50,7 @@
       <textarea
         id="comment-input"
         rows="3"
-        placeholder="例）この部分に興味があります / もっと知りたい内容でした など"
+        placeholder="例）この部分が気になる / もっと知りたい など"
       ></textarea>
 
       <div class="comment-button-row">

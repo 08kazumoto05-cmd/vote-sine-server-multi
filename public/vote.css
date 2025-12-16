@@ -48,9 +48,13 @@
   color: #374151;
 }
 
-/* 投票ボックス */
+/* 投票ボックス（3ボタン対応：PCは横並び/均等、スマホは縦） */
 .vote-box {
-  text-align: center;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  align-items: stretch;
+  flex-wrap: wrap;
   margin: 26px 0 18px;
 }
 
@@ -60,10 +64,9 @@
   align-items: center;
   justify-content: center;
   min-width: 160px;
-  padding: 13px 26px;
-  margin: 10px;
+  padding: 13px 22px;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   border-radius: 999px;
   cursor: pointer;
   border: 1px solid transparent;
@@ -73,30 +76,65 @@
     box-shadow 0.15s ease-out,
     background 0.2s ease,
     border-color 0.2s ease,
-    color 0.2s ease;
+    color 0.2s ease,
+    filter 0.2s ease;
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
 }
 
-/* 興味があるボタン（ブルー） */
-.btn.understood {
+/* 押下・フォーカス */
+.btn:active {
+  transform: translateY(0px) scale(0.99);
+  filter: brightness(0.98);
+}
+.btn:focus-visible {
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.6);
+}
+
+/* 3択：気になる（+1）＝ブルー */
+.btn.interested {
   background: linear-gradient(135deg, #0ea5e9, #6366f1);
   color: #f9fafb;
   box-shadow: 0 14px 35px rgba(59, 130, 246, 0.55);
 }
-.btn.understood:hover {
+.btn.interested:hover {
   transform: translateY(-1px);
   box-shadow: 0 18px 50px rgba(59, 130, 246, 0.7);
 }
 
-/* あまり興味がないボタン（オレンジ） */
-.btn.not-understood {
+/* 3択：普通（0）＝グレー/スレート */
+.btn.neutral {
+  background: linear-gradient(135deg, #64748b, #334155);
+  color: #f8fafc;
+  box-shadow: 0 14px 35px rgba(51, 65, 85, 0.35);
+}
+.btn.neutral:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 50px rgba(51, 65, 85, 0.5);
+}
+
+/* 3択：気にならない（-1）＝ピンク寄りオレンジ */
+.btn.not-interested {
   background: linear-gradient(135deg, #f97316, #f43f5e);
   color: #fff7ed;
   box-shadow: 0 14px 35px rgba(248, 113, 113, 0.5);
 }
-.btn.not-understood:hover {
+.btn.not-interested:hover {
   transform: translateY(-1px);
   box-shadow: 0 18px 50px rgba(248, 113, 113, 0.7);
+}
+
+/* 旧クラス互換（もしHTMLが古いままでも見た目が崩れないように） */
+.btn.understood { /* ＝気になる想定 */
+  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  color: #f9fafb;
+  box-shadow: 0 14px 35px rgba(59, 130, 246, 0.55);
+}
+.btn.not-understood { /* ＝気にならない想定 */
+  background: linear-gradient(135deg, #f97316, #f43f5e);
+  color: #fff7ed;
+  box-shadow: 0 14px 35px rgba(248, 113, 113, 0.5);
 }
 
 /* ゴーストボタン（コメント送信） */
@@ -112,11 +150,20 @@
   transform: translateY(-1px);
 }
 
+/* 送信後にボタン無効化した時の見た目 */
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
 /* メッセージ表示 */
 .message {
   font-size: 15px;
   margin-top: 10px;
-  font-weight: 600;
+  font-weight: 700;
   color: #0f172a;
   text-align: center;
 }
@@ -182,9 +229,16 @@ textarea:focus {
     padding: 22px 18px 24px;
   }
 
+  .vote-box {
+    gap: 10px;
+  }
+
   .btn {
     width: 100%;
-    max-width: 100%;
-    margin: 6px 0;
+    min-width: 0;
+  }
+
+  .comment-button-row {
+    text-align: center;
   }
 }
