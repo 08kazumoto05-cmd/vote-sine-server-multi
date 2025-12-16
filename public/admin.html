@@ -95,7 +95,7 @@
         <div class="card danger">
           <h2 class="card-title">全投票データを完全リセット</h2>
           <p class="card-caption">
-            現在セッション・過去3セッションのグラフをすべて削除します。
+            現在セッション・過去4セッションのグラフをすべて削除します。
           </p>
           <button id="btn-reset-all" class="btn danger ghost">全投票データを完全リセット</button>
         </div>
@@ -131,7 +131,7 @@
           </div>
         </div>
 
-        <!-- 現在セッション ★ 高さ 1200 → 800 に縮小 -->
+        <!-- 現在セッション -->
         <div class="card large">
           <div class="card-header-row">
             <h2 class="card-title">興味度（興味がある − あまり興味がない）の推移</h2>
@@ -141,11 +141,11 @@
           <canvas id="sineCanvas" width="1600" height="800"></canvas>
         </div>
 
-        <!-- 過去セッション（高さ 400px × 3つ） -->
+        <!-- 過去セッション（400px × 4つ） -->
         <div class="card">
           <div class="card-header-row">
             <h2 class="card-title">過去セッションの興味度推移</h2>
-            <span class="card-caption">最近3回分まで保存</span>
+            <span class="card-caption">最近4回分まで保存</span>
           </div>
 
           <div class="prev-session-wrap">
@@ -174,13 +174,22 @@
               <canvas id="prevChart3" width="1600" height="400"></canvas>
             </div>
 
+            <!-- ★ 4つ目を追加 -->
+            <div class="prev-session-block">
+              <p class="card-caption">
+                <span id="prevChart-note4">4つ前のセッション：まだグラフはありません。</span>
+                <span id="prevChart-rate4" class="prev-session-rate"></span>
+              </p>
+              <canvas id="prevChart4" width="1600" height="400"></canvas>
+            </div>
+
           </div>
         </div>
 
-        <!-- 連結グラフ ★ 高さ 1200 → 800 に縮小 -->
+        <!-- 連結グラフ -->
         <div class="card">
           <div class="card-header-row">
-            <h2 class="card-title">セッション1〜3 連結グラフ（最終興味度）</h2>
+            <h2 class="card-title">セッション1〜4 連結グラフ（最終興味度）</h2>
             <span class="card-caption">前セッション終点と次セッション始点がつながる</span>
           </div>
 
