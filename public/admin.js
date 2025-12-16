@@ -13,7 +13,7 @@
 // ・4つ目の色は黄色
 // ・各セッション最終到達点に同色の点＋％ラベル
 //
-// ★過去セッション表示は「降順（古い→新しい）」に変更
+// ★過去セッション表示は「昇順（新しい→古い）」＝保存順（0番が最新）で表示
 //
 // ==== パスワード ====
 // 管理パスワード: cpa1968
@@ -283,21 +283,15 @@ function drawLineChart() {
 }
 
 // ==== 過去セッションのグラフ描画 ====
-// ★「降順（古い→新しい）」で表示する
+// ★昇順（新しい→古い）：prevSessionsの保存順（0番が最新）のまま表示
 function drawPrevSessions() {
-  // 画面にある枠数ぶん（null枠も含むが安全にスキップする）
   const maxSlots = prevCanvases.length; // 4
+  const sessionsForDisplay = prevSessions.slice(0, maxSlots); // ★ reverseしない
 
-  // prevSessions(新しい順) -> 表示用に逆順(古い→新しい)
-  const sessionsForDisplay = prevSessions.slice(0, maxSlots).slice().reverse();
-
-  // 「古い→新しい」表示なので、各枠のラベルはこうする：
-  // 一番右(最後)が「1つ前」、その左が「2つ前」…という意味になる
   const makeLabel = (slotIndex) => {
-    const fromLatest = (maxSlots - 1) - slotIndex; // 0:一番新しい(=1つ前), 1:2つ前...
-    if (fromLatest === 0) return "1つ前";
-    if (fromLatest === 1) return "2つ前";
-    if (fromLatest === 2) return "3つ前";
+    if (slotIndex === 0) return "1つ前";
+    if (slotIndex === 1) return "2つ前";
+    if (slotIndex === 2) return "3つ前";
     return "4つ前";
   };
 
@@ -308,7 +302,6 @@ function drawPrevSessions() {
     const rateLabel = prevRateLabels[i];
     const pctx = prevCtxs[i];
 
-    // HTMLにその枠がない場合はスキップ
     if (!c || !pctx) continue;
 
     const w = c.width;
@@ -427,7 +420,6 @@ function drawSessionChain() {
     return;
   }
 
-  // 連結点列：先頭0% + 各セッション最終値
   const chainPoints = [];
   const firstSessionColor = sessionsOldestFirst[0].color || SESSION_COLORS[0];
 
@@ -452,7 +444,6 @@ function drawSessionChain() {
   const plotW = w - L - R;
   const plotH = h - T - B;
 
-  // 枠
   sessionChainCtx.strokeStyle = "#FFFFFF";
   sessionChainCtx.lineWidth = 6;
   sessionChainCtx.setLineDash([]);
@@ -462,7 +453,6 @@ function drawSessionChain() {
   sessionChainCtx.lineTo(w - R, h - B);
   sessionChainCtx.stroke();
 
-  // Y軸
   const yTicks = [0, 25, 50, 75, 100];
   sessionChainCtx.font = "30px sans-serif";
   sessionChainCtx.textAlign = "right";
@@ -485,7 +475,6 @@ function drawSessionChain() {
     sessionChainCtx.fillText(v + "%", L - 20, y);
   });
 
-  // X補助線
   sessionChainCtx.strokeStyle = "#666666";
   sessionChainCtx.lineWidth = 3;
   sessionChainCtx.setLineDash([20, 20]);
@@ -498,7 +487,6 @@ function drawSessionChain() {
   });
   sessionChainCtx.setLineDash([]);
 
-  // 線
   const stepX = plotW / Math.max(1, chainPoints.length - 1);
 
   let lastX = null;
@@ -523,7 +511,6 @@ function drawSessionChain() {
     lastX = x; lastY = y;
   });
 
-  // 点＋ラベル
   const pointRadius = 10;
   chainPoints.forEach((pt, idx) => {
     if (!pt.isSessionPoint) return;
@@ -531,13 +518,11 @@ function drawSessionChain() {
     const x = L + stepX * idx;
     const y = valueToY(pt.rate, h, B, plotH);
 
-    // 白縁
     sessionChainCtx.beginPath();
     sessionChainCtx.arc(x, y, pointRadius + 2, 0, Math.PI * 2);
     sessionChainCtx.fillStyle = "#FFFFFF";
     sessionChainCtx.fill();
 
-    // 中身（セッション色）
     sessionChainCtx.beginPath();
     sessionChainCtx.arc(x, y, pointRadius, 0, Math.PI * 2);
     sessionChainCtx.fillStyle = pt.color;
@@ -550,7 +535,6 @@ function drawSessionChain() {
     sessionChainCtx.fillText(`${Math.round(pt.rate)}%`, x, y - pointRadius - 10);
   });
 
-  // タイトル
   sessionChainCtx.font = "40px sans-serif";
   sessionChainCtx.fillStyle = "#FFFFFF";
   sessionChainCtx.textAlign = "left";
@@ -653,7 +637,6 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
-// finalRate は「履歴の最後（=同一計算式）」を保存
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
     const ok = confirm("現在セッションの票・コメント・グラフをリセットします。\n本当に実行しますか？");
