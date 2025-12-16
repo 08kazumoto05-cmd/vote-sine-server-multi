@@ -1,18 +1,9 @@
 // ===============================
-// admin.js（興味率：カード/現在/過去/連結 全部同一ロジック）
+// admin.js（興味率：カード/現在/過去/連結 + コメント保存＆色分け）
 // ===============================
 //
-// 興味がある = +1
-// 興味がない = -1
-// 興味率(%) = (興味がある − 興味がない) / 想定投票人数 * 100（0〜100にクリップ）
-//
-// ・各セッションのグラフは 1点目だけ0として描画（0スタート演出）
-// ・過去セッションは最大4件保存
-// ・連結グラフ：0% → セッション1最終興味率 → … → セッション4
-// ・4つ目の色は黄色
-//
-// ★過去セッション表示は「昇順（新しい→古い）」＝保存順（0番が最新）で表示
-// ★「〜前」ではなく「◯回目のリセットセッション」で表示（保存した回数で表示）
+// ★追加：リセット時に「その時点のコメント」を prevSessions に保存する
+// ★追加：コメントタイムラインは「現在 + 過去保存分」を統合表示し、セッション色で識別
 //
 // ==== パスワード ====
 // 管理パスワード: cpa1968
@@ -77,18 +68,19 @@ const sessionChainCtx = sessionChainCanvas ? sessionChainCanvas.getContext("2d")
 // 現在セッションの履歴 [{ ts, rate }]
 let history = [];
 
-// 過去セッション（最大4つ）
 // prevSessions は「新しい順（0番が最新）」で保存される（unshift）
-// { color, points:[{ts,rate}], finalRate, resetNo }
+// { resetNo, color, points:[{ts,rate}], finalRate, comments:[{ts,text,choice}] }
 let prevSessions = [];
 
-// resetCount は「何回リセットしたか」（= 何回目のリセットになるか）
 let resetCount = 0;
 
 // ★ 4つ目を黄色に
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a", "#ffd600"];
 
 let animationStarted = false;
+
+// ★ 最新取得した「現在セッションのコメント」（リセット直前に退避する）
+let latestCurrentComments = [];
 
 // ==== ユーティリティ ====
 function getCurrentColor() {
@@ -107,6 +99,22 @@ function calcInterestRate(u, n, maxP) {
   if (rate < 0) rate = 0;
   if (rate > 100) rate = 100;
   return rate;
+}
+
+function safeTs(x) {
+  const t = Number(x);
+  return Number.isFinite(t) ? t : Date.now();
+}
+
+function normalizeComments(comments) {
+  if (!Array.isArray(comments)) return [];
+  return comments
+    .map(c => ({
+      ts: safeTs(c?.ts),
+      text: String(c?.text ?? ""),
+      choice: c?.choice === "understood" ? "understood" : "not-understood",
+    }))
+    .filter(c => c.text.trim().length > 0 || c.ts); // 空でもtsがあれば残す（必要なら条件外してOK）
 }
 
 // ==== 結果取得 ====
@@ -140,7 +148,12 @@ async function fetchResults() {
     themeInfo.textContent = theme ? `現在のテーマ：${theme}` : "現在のテーマ：未設定";
     if (document.activeElement !== themeInput) themeInput.value = theme;
 
-    renderComments(data.comments || []);
+    // ★ 現在セッションのコメントを保持（リセット直前の保存に使う）
+    latestCurrentComments = normalizeComments(data.comments || []);
+
+    // ★ タイムライン描画（現在 + 過去保存分）
+    renderCommentTimeline(latestCurrentComments);
+
     addRatePoint(rate);
 
     if (!animationStarted) {
@@ -266,8 +279,7 @@ function drawLineChart() {
   requestAnimationFrame(drawLineChart);
 }
 
-// ==== 過去セッション描画 ====
-// ★「◯回目のリセットセッション」で表示（昇順：新しい→古い）
+// ==== 過去セッション描画（グラフ） ====
 function drawPrevSessions() {
   const maxSlots = prevCanvases.length; // 4
   const sessionsForDisplay = prevSessions.slice(0, maxSlots); // 新しい→古い
@@ -287,7 +299,6 @@ function drawPrevSessions() {
     pctx.fillStyle = "#000000";
     pctx.fillRect(0, 0, w, h);
 
-    // ★ 空枠でも「何回目」を必ず出す（見た目が変わらない問題を潰す）
     const shownResetNo = session?.resetNo ?? (resetCount - i > 0 ? (resetCount - i) : "—");
 
     if (!session || !session.points || session.points.length === 0) {
@@ -492,11 +503,40 @@ function drawSessionChain() {
   sessionChainCtx.fillText("セッション1→2→3→4 最終興味率 連結グラフ", L, 60);
 }
 
-// ==== コメント表示 ====
-function renderComments(comments) {
+// ==== コメント表示（現在 + 過去保存分を統合） ====
+// ★ セッション色で判別できるように「左線＆丸」を色付け
+function renderCommentTimeline(currentComments) {
   commentList.innerHTML = "";
 
-  if (!comments || comments.length === 0) {
+  const currentColor = getCurrentColor();
+
+  // 1) 現在セッション分
+  const nowItems = (normalizeComments(currentComments) || []).map(c => ({
+    ...c,
+    sessionLabel: "現在セッション",
+    sessionColor: currentColor,
+    sessionOrder: 999999, // 表示に使わないが保険
+  }));
+
+  // 2) 過去セッション分（保存済み）
+  const pastItems = [];
+  prevSessions.forEach(s => {
+    const label = `${s.resetNo}回目のリセットセッション`;
+    const color = s.color || "#888";
+    const comments = normalizeComments(s.comments || []);
+    comments.forEach(c => {
+      pastItems.push({
+        ...c,
+        sessionLabel: label,
+        sessionColor: color,
+        sessionOrder: s.resetNo ?? 0,
+      });
+    });
+  });
+
+  const all = [...nowItems, ...pastItems];
+
+  if (all.length === 0) {
     const p = document.createElement("p");
     p.textContent = "まだコメントはありません。";
     p.className = "small-note";
@@ -504,22 +544,48 @@ function renderComments(comments) {
     return;
   }
 
-  comments.slice().reverse().forEach(c => {
+  // 新しい順に並べる（全セッション横断で最新が上）
+  all.sort((a, b) => safeTs(b.ts) - safeTs(a.ts));
+
+  all.forEach(c => {
     const item = document.createElement("div");
     item.className = "comment-item";
+    item.style.borderLeft = `6px solid ${c.sessionColor}`;
 
     const meta = document.createElement("div");
     meta.className = "comment-meta";
 
-    const tag = document.createElement("span");
-    tag.className = "comment-tag " + (c.choice === "understood" ? "understood" : "not-understood");
-    tag.textContent = c.choice === "understood" ? "興味がある" : "興味がない";
+    // セッション色の丸
+    const dot = document.createElement("span");
+    dot.style.display = "inline-block";
+    dot.style.width = "10px";
+    dot.style.height = "10px";
+    dot.style.borderRadius = "50%";
+    dot.style.background = c.sessionColor;
+    dot.style.marginRight = "8px";
+    dot.style.verticalAlign = "middle";
 
+    // セッション名
+    const sessionSpan = document.createElement("span");
+    sessionSpan.textContent = c.sessionLabel;
+    sessionSpan.style.marginRight = "10px";
+    sessionSpan.style.color = c.sessionColor;
+    sessionSpan.style.fontWeight = "700";
+
+    // 選択タグ（既存クラスを活かす）
+    const tag = document.createElement("span");
+    const isU = c.choice === "understood";
+    tag.className = "comment-tag " + (isU ? "understood" : "not-understood");
+    tag.textContent = isU ? "興味がある" : "興味がない";
+
+    // 時刻
     const time = document.createElement("span");
     let timeText = "";
-    try { timeText = new Date(c.ts).toLocaleString("ja-JP"); } catch { timeText = c.ts || ""; }
+    try { timeText = new Date(safeTs(c.ts)).toLocaleString("ja-JP"); } catch { timeText = String(c.ts || ""); }
     time.textContent = timeText;
 
+    meta.appendChild(dot);
+    meta.appendChild(sessionSpan);
     meta.appendChild(tag);
     meta.appendChild(time);
 
@@ -587,7 +653,7 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
-// ★ resetNo を必ず保存する
+// ★ resetNo と「その時点のコメント」も保存する
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
     const ok = confirm("現在セッションの票・コメント・グラフをリセットします。\n本当に実行しますか？");
@@ -600,20 +666,26 @@ if (btnReset) {
         const lastRate = Math.max(0, Math.min(100, history[history.length - 1].rate));
         const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
 
-        // ★ このリセットが「何回目」か（保存回数）
         const resetNo = resetCount + 1;
 
+        // ★ リセット直前の「現在コメント」を保存（ここがポイント）
+        const savedComments = normalizeComments(latestCurrentComments);
+
         prevSessions.unshift({
-          resetNo,               // ★ 追加
+          resetNo,
           color: currentColor,
           points: copy,
-          finalRate: lastRate
+          finalRate: lastRate,
+          comments: savedComments, // ★ 追加
         });
 
         if (prevSessions.length > 4) prevSessions = prevSessions.slice(0, 4);
 
         drawPrevSessions();
         drawSessionChain();
+
+        // ★ タイムラインも即時更新（サーバ消去前に保存して反映）
+        renderCommentTimeline([]); // 現在コメントはこのあと消える前提
       }
 
       const res = await fetch("/api/admin/reset", { method: "POST" });
@@ -621,9 +693,12 @@ if (btnReset) {
 
       resetCount++;
       history = [];
+      latestCurrentComments = [];
 
-      await fetchResults();
-      drawPrevSessions(); // ★ 念のため再描画
+      await fetchResults();   // ここで現在セッション（空）＋過去保存分が表示される
+      drawPrevSessions();
+      drawSessionChain();
+
       alert("投票データをリセットしました。");
     } catch (e) {
       console.error(e);
@@ -635,7 +710,7 @@ if (btnReset) {
 // ==== 全投票データ完全リセット ====
 if (btnResetAll) {
   btnResetAll.addEventListener("click", async () => {
-    const ok = confirm("現在セッション＋過去のセッションのグラフをすべて削除します。\n本当に完全リセットしますか？");
+    const ok = confirm("現在セッション＋過去のセッションのグラフ/コメントをすべて削除します。\n本当に完全リセットしますか？");
     if (!ok) return;
 
     try {
@@ -645,9 +720,12 @@ if (btnResetAll) {
       history = [];
       prevSessions = [];
       resetCount = 0;
+      latestCurrentComments = [];
 
       drawPrevSessions();
       drawSessionChain();
+      renderCommentTimeline([]);
+
       await fetchResults();
 
       alert("全投票データを完全リセットしました。");
