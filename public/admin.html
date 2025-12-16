@@ -95,7 +95,7 @@
         <div class="card danger">
           <h2 class="card-title">全投票データを完全リセット</h2>
           <p class="card-caption">
-            現在セッション・過去4セッションのグラフをすべて削除します。
+            現在セッション・過去セッションのグラフをすべて削除します。
           </p>
           <button id="btn-reset-all" class="btn danger ghost">全投票データを完全リセット</button>
         </div>
@@ -141,7 +141,7 @@
           <canvas id="sineCanvas" width="1600" height="800"></canvas>
         </div>
 
-        <!-- 過去セッション（400px × 4つ） -->
+        <!-- 過去セッション（★ 4つに増やす） -->
         <div class="card">
           <div class="card-header-row">
             <h2 class="card-title">過去セッションの興味度推移</h2>
@@ -174,7 +174,7 @@
               <canvas id="prevChart3" width="1600" height="400"></canvas>
             </div>
 
-            <!-- ★ 4つ目を追加 -->
+            <!-- ★ 追加：4つ前 -->
             <div class="prev-session-block">
               <p class="card-caption">
                 <span id="prevChart-note4">4つ前のセッション：まだグラフはありません。</span>
