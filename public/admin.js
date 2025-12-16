@@ -3,13 +3,13 @@
 // ===============================
 //
 // ・管理パスワード: cpa1968
-// ・現在/過去セッションのグラフ：0〜100%（マイナスは0にクリップ）
+// ・現在セッションのグラフ：興味率（興味がある / 合計 * 100）を 0〜100% で表示
 // ・各セッションのグラフは 1点目だけ0として描画（0スタート演出）
 // ・過去セッションは最大3件保存
 // ・連結グラフ：
 //    0% → セッション1最終興味度 → セッション2最終興味度 → セッション3最終興味度
 //    という折れ線。セグメントごとにセッション色で描画。
-// ・「最終興味度」は、リセットボタンを押した時点の「興味度カード」の値（表示％）を保存して使用
+// ・「最終興味度」は、リセット時の「興味率カード」の値（表示％）を保存して使用
 // ・各セッション最終到達点に、そのセッションと同じ色の点＋％ラベルを描画
 
 // ==== パスワード ====
@@ -74,11 +74,9 @@ const sessionChainCtx = sessionChainCanvas
 let history = [];
 
 // 過去セッション（最大3つ）
-// 先頭: 一番新しいセッション
-// 形式: { color: "#xxxxxx", points: [{ts, rate}], finalRate: number(0〜100) }
 let prevSessions = [];
 
-// リセット回数（0:初回, 1:1回目リセット後, 2:2回目リセット後…）
+// リセット回数
 let resetCount = 0;
 
 // セッションごとの色
@@ -121,38 +119,36 @@ async function fetchResults() {
     numNotUnderstood.textContent = n;
     numTotal.textContent = total;
 
-    // 表示用興味度（％）※ここが「最終興味度」に使われる
+    // 表示用興味率（％）※ここが「最終興味度」に使われる（そのまま）
     const rateDisplay = total > 0 ? Math.round((u / total) * 100) : 0;
     rateUnderstood.textContent = rateDisplay + "%";
 
     // --- グラフ用の値（0〜100） ---
+    // ★変更：現在セッションのグラフも「興味率（u/total）」に統一
     let rate = null;
 
-    if (maxP > 0) {
-      if (total === 0 && history.length > 0) {
-        // 投票が 0 でも履歴があるときは前回値を維持
+    if (total === 0) {
+      // 投票が 0 でも履歴があるときは前回値を維持
+      if (history.length > 0) {
         rate = history[history.length - 1].rate;
-      } else if (total === 0 && history.length === 0) {
-        rate = null; // まだ何も描かない
       } else {
-        // 興味度 = (興味がある − あまり興味がない) / 想定人数 * 100
-        rate = ((u - n) / maxP) * 100;
-        if (rate < 0) rate = 0;
-        if (rate > 100) rate = 100;
+        rate = null; // まだ何も描かない
       }
     } else {
-      // 想定人数が未設定 → グラフは描かない
-      rate = null;
+      rate = (u / total) * 100; // 0〜100
+      if (rate < 0) rate = 0;
+      if (rate > 100) rate = 100;
     }
 
-    // 想定人数 UI
+    // 想定人数 UI（表示は残す）
     if (document.activeElement !== maxInput) {
       maxInput.value = maxP;
     }
     if (maxP > 0) {
       maxInfo.textContent = `想定人数：${maxP}人中、${total}人が投票済み`;
     } else {
-      maxInfo.textContent = "想定人数が未設定です（グラフは表示されません）";
+      // ★「グラフは表示されません」をやめる（今回は maxP に依存しないグラフのため）
+      maxInfo.textContent = `想定人数は未設定です（現在の投票数：${total}人）`;
     }
 
     // テーマ UI
@@ -205,18 +201,6 @@ function drawLineChart() {
   // 背景
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
-
-  const maxP = Number(maxInput.value || "0");
-
-  if (maxP <= 0) {
-    ctx.fillStyle = "#CCCCCC";
-    ctx.font = "32px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("想定人数が未設定です。", w / 2, h / 2);
-    requestAnimationFrame(drawLineChart);
-    return;
-  }
 
   if (history.length === 0) {
     ctx.fillStyle = "#CCCCCC";
@@ -296,7 +280,6 @@ function drawLineChart() {
   ctx.beginPath();
 
   history.forEach((p, i) => {
-    // 1点目だけは 0 として描画（0スタート演出）
     const displayRate = i === 0 ? 0 : p.rate;
     const x = L + i * stepX;
     const y = valueToY(displayRate, h, B, plotH);
@@ -305,13 +288,13 @@ function drawLineChart() {
   });
   ctx.stroke();
 
-  // タイトル
+  // タイトル（★文言を興味率に）
   ctx.font = "32px sans-serif";
   ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.fillText(
-    "現在セッション興味度推移（0〜100％）",
+    "現在セッション興味率推移（興味がある / 合計, 0〜100％）",
     L + 4,
     8
   );
@@ -320,8 +303,6 @@ function drawLineChart() {
 }
 
 // ==== 過去セッションのグラフ描画 ====
-// ・各セッション 1 点目は 0 として描画（0スタート）
-// ・右横に「最終興味度：◯◯％」を表示
 function drawPrevSessions() {
   for (let i = 0; i < 3; i++) {
     const session = prevSessions[i];
@@ -438,10 +419,6 @@ function drawPrevSessions() {
 }
 
 // ==== セッション1〜3 連結グラフ ====
-// ・第1セッション: 0% → 最終興味度 まで線が上昇
-// ・第2,3セッション: 前セッションの最終興味度 → 自分の最終興味度
-// ・各区間は該当セッションの色で描画
-// ・各セッションの最終到達点に同じ色の丸い点＋％ラベルを描画
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
@@ -451,7 +428,6 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#000000";
   sessionChainCtx.fillRect(0, 0, w, h);
 
-  // 最新から 3 件まで → 古い順に並べ替え
   const sessionsNewestFirst = prevSessions.slice(0, 3);
   const sessionsOldestFirst = sessionsNewestFirst
     .slice()
@@ -467,21 +443,16 @@ function drawSessionChain() {
     return;
   }
 
-  // ---- 連結用のポイント列（0スタート込み）----
-  // 先頭: 0%（第1セッションと同じ色）
-  // その後: 各セッションの最終興味度（reset時の値）
   const chainPoints = [];
 
-  // 0% スタート
   const firstSessionColor =
     sessionsOldestFirst[0].color || SESSION_COLORS[0];
   chainPoints.push({
     rate: 0,
     color: firstSessionColor,
-    isSessionPoint: false // 0%の起点
+    isSessionPoint: false
   });
 
-  // 各セッションの最終興味度
   sessionsOldestFirst.forEach((session, idx) => {
     let r =
       typeof session.finalRate === "number"
@@ -510,7 +481,6 @@ function drawSessionChain() {
   const plotW = w - L - R;
   const plotH = h - T - B;
 
-  // 枠
   sessionChainCtx.strokeStyle = "#FFFFFF";
   sessionChainCtx.lineWidth = 6;
   sessionChainCtx.setLineDash([]);
@@ -520,7 +490,6 @@ function drawSessionChain() {
   sessionChainCtx.lineTo(w - R, h - B);
   sessionChainCtx.stroke();
 
-  // Y軸（0〜100）
   const yTicks = [0, 25, 50, 75, 100];
   sessionChainCtx.font = "30px sans-serif";
   sessionChainCtx.textAlign = "right";
@@ -543,7 +512,6 @@ function drawSessionChain() {
     sessionChainCtx.fillText(v + "%", L - 20, y);
   });
 
-  // X補助線
   sessionChainCtx.strokeStyle = "#666666";
   sessionChainCtx.lineWidth = 3;
   sessionChainCtx.setLineDash([20, 20]);
@@ -556,11 +524,9 @@ function drawSessionChain() {
   });
   sessionChainCtx.setLineDash([]);
 
-  // ポイントを等間隔に配置
   const totalPoints = chainPoints.length;
   const stepX = totalPoints > 1 ? plotW / (totalPoints - 1) : 0;
 
-  // まず線を描く
   let lastX = null;
   let lastY = null;
 
@@ -574,7 +540,6 @@ function drawSessionChain() {
       return;
     }
 
-    // 前の点 → 今の点 を、今の点の color で描画
     sessionChainCtx.strokeStyle = pt.color;
     sessionChainCtx.lineWidth = 6;
     sessionChainCtx.setLineDash([]);
@@ -587,27 +552,23 @@ function drawSessionChain() {
     lastY = y;
   });
 
-  // 各セッションの最終到達点に点＋％ラベルを描画
   const pointRadius = 10;
   chainPoints.forEach((pt, idx) => {
-    if (!pt.isSessionPoint) return; // 0%起点はスキップ
+    if (!pt.isSessionPoint) return;
 
     const x = L + stepX * idx;
     const y = valueToY(pt.rate, h, B, plotH);
 
-    // 白い縁の丸
     sessionChainCtx.beginPath();
     sessionChainCtx.arc(x, y, pointRadius + 2, 0, Math.PI * 2);
     sessionChainCtx.fillStyle = "#FFFFFF";
     sessionChainCtx.fill();
 
-    // セッション色の中身
     sessionChainCtx.beginPath();
     sessionChainCtx.arc(x, y, pointRadius, 0, Math.PI * 2);
     sessionChainCtx.fillStyle = pt.color;
     sessionChainCtx.fill();
 
-    // ％ラベル（点の少し上に、同じ色で）
     sessionChainCtx.font = "28px sans-serif";
     sessionChainCtx.textAlign = "center";
     sessionChainCtx.textBaseline = "bottom";
@@ -615,7 +576,6 @@ function drawSessionChain() {
     sessionChainCtx.fillText(`${Math.round(pt.rate)}%`, x, y - pointRadius - 10);
   });
 
-  // タイトル
   sessionChainCtx.font = "40px sans-serif";
   sessionChainCtx.fillStyle = "#FFFFFF";
   sessionChainCtx.textAlign = "left";
@@ -711,9 +671,7 @@ if (btnSaveMax && maxInput) {
       alert("想定投票人数を保存しました。");
     } catch (e) {
       console.error(e);
-      alert(
-        "想定人数の保存に失敗しました。時間をおいて再度お試しください。"
-      );
+      alert("想定人数の保存に失敗しました。時間をおいて再度お試しください。");
     }
   });
 }
@@ -745,8 +703,6 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
-// 現在の履歴を prevSessions に保存し、
-// finalRate は「rateUnderstood に表示されている％」を採用
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
     const ok = confirm(
@@ -757,7 +713,6 @@ if (btnReset) {
     try {
       const currentColor = getCurrentColor();
 
-      // 現在セッションを過去セッションに保存（先頭に追加）
       if (history.length > 0) {
         const rateText = rateUnderstood.textContent || "0%";
         const numeric = parseInt(rateText.replace("%", ""), 10) || 0;
@@ -774,14 +729,10 @@ if (btnReset) {
         drawSessionChain();
       }
 
-      // サーバー側リセット
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // リセット回数（色を進める）
       resetCount++;
-
-      // 新しいセッションの履歴をクリア
       history = [];
 
       await fetchResults();
