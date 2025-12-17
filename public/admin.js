@@ -2,13 +2,14 @@
 // admin.js（興味率：カード/現在/過去/連結 + コメント保存＆色分け）
 // ===============================
 //
-// 変更点（3択対応）
-// - 気になる: +1（positive）
-// - 普通: 0（neutral）
-// - 気にならない: -1（negative）
-// - 計算式は従来前提：((+1票) - (-1票)) / 想定人数 * 100 を 0〜100 に丸め
-// - コメント表示も3択ラベル対応
-// - 旧choice（understood / not-understood）も互換で表示
+// ✅ 平均スコア方式（普通でもグラフが動く）
+// - 気になる: +1
+// - 普通: 0
+// - 気にならない: -1
+// - 平均スコア = (気になる - 気にならない) / 全投票数
+// - 表示% = (平均スコア + 1) / 2 * 100 （0〜100に丸め）
+// - /api/results 互換: understood=気になる, notUnderstood=気にならない, neutral=普通
+// - コメントchoice互換: interested/neutral/not-interested, understood/not-understood も吸収
 //
 // ==== パスワード ====
 // 管理パスワード: cpa1968
@@ -22,10 +23,13 @@ const pwInput = document.getElementById("admin-password");
 const btnUnlock = document.getElementById("btn-unlock");
 const lockMsg = document.getElementById("lock-message");
 
-const numUnderstood = document.getElementById("num-understood");           // (表示) 気になる
-const numNotUnderstood = document.getElementById("num-not-understood");   // (表示) 気にならない
+const numUnderstood = document.getElementById("num-understood");          // (表示) 気になる
+const numNotUnderstood = document.getElementById("num-not-understood");  // (表示) 気にならない
 const numTotal = document.getElementById("num-total");
-const rateUnderstood = document.getElementById("rate-understood");         // 興味率(カード)
+const rateUnderstood = document.getElementById("rate-understood");        // 興味度(カード)
+
+// （任意）普通の票数を表示したい場合：HTMLに id="num-neutral" があれば反映される
+const numNeutral = document.getElementById("num-neutral");
 
 const canvas = document.getElementById("sineCanvas");
 const ctx = canvas.getContext("2d");
@@ -43,9 +47,6 @@ const btnResetAll = document.getElementById("btn-reset-all");
 const themeInput = document.getElementById("theme-input");
 const btnSaveTheme = document.getElementById("btn-save-theme");
 const themeInfo = document.getElementById("theme-info");
-
-// （任意）普通の票数を表示したい場合に備えて。HTMLに id="num-neutral" があれば表示される
-const numNeutral = document.getElementById("num-neutral");
 
 // 過去セッション用キャンバス（4枠）
 const prevCanvases = [
@@ -96,20 +97,23 @@ function getCurrentColor() {
   return SESSION_COLORS[idx];
 }
 
-function valueToY(value, canvasHeight, bottomPadding, plotHeight) {
-  const v = Math.max(0, Math.min(100, value));
-  return canvasHeight - bottomPadding - (v / 100) * plotHeight;
+function clamp01(x) {
+  if (!Number.isFinite(x)) return 0;
+  if (x < 0) return 0;
+  if (x > 1) return 1;
+  return x;
 }
 
-// ★ 3択：従来前提の計算（差分 / 想定人数）
-// 気になる(+1)を pos、気にならない(-1)を neg として、普通は計算に影響なし（0）
-function calcInterestRate(pos, neg, maxP) {
-  if (!Number.isFinite(maxP) || maxP <= 0) return null;
+function clamp100(x) {
+  if (!Number.isFinite(x)) return 0;
+  if (x < 0) return 0;
+  if (x > 100) return 100;
+  return x;
+}
 
-  let rate = ((pos - neg) / maxP) * 100;
-  if (rate < 0) rate = 0;
-  if (rate > 100) rate = 100;
-  return rate;
+function valueToY(value, canvasHeight, bottomPadding, plotHeight) {
+  const v = clamp100(value);
+  return canvasHeight - bottomPadding - (v / 100) * plotHeight;
 }
 
 function safeTs(x) {
@@ -117,17 +121,22 @@ function safeTs(x) {
   return Number.isFinite(t) ? t : Date.now();
 }
 
-// choice の互換吸収（旧: understood/not-understood）
+// choice の互換吸収（旧/新どっちでも動くように）
 function normalizeChoice(choice) {
-  if (choice === "positive") return "positive";
+  // 新：投票側/サーバ側想定
+  if (choice === "interested") return "positive";
   if (choice === "neutral") return "neutral";
+  if (choice === "not-interested") return "negative";
+
+  // 旧：admin側で使ってた表現
+  if (choice === "positive") return "positive";
   if (choice === "negative") return "negative";
 
-  // 旧互換
+  // 旧々：2択互換
   if (choice === "understood") return "positive";
   if (choice === "not-understood") return "negative";
 
-  // コメントのみ等で null/undefined の場合は neutral 扱いにしておく
+  // コメントのみ等
   return "neutral";
 }
 
@@ -142,6 +151,19 @@ function normalizeComments(comments) {
     .filter(c => c.text.trim().length > 0 || c.ts);
 }
 
+// ✅ 平均スコア方式
+// 平均スコア = (pos - neg) / totalVotes
+// 表示% = (avg + 1)/2 * 100
+function calcInterestRateAvg(pos, neu, neg) {
+  const totalVotes = (Number(pos) || 0) + (Number(neu) || 0) + (Number(neg) || 0);
+  if (totalVotes <= 0) return null;
+
+  const scoreSum = (Number(pos) || 0) - (Number(neg) || 0); // +1*pos + 0*neu -1*neg
+  const avg = scoreSum / totalVotes; // -1..+1
+  const pct = (avg + 1) / 2; // 0..1
+  return clamp100(pct * 100);
+}
+
 // ==== 結果取得 ====
 async function fetchResults() {
   try {
@@ -150,43 +172,43 @@ async function fetchResults() {
 
     const data = await res.json();
 
-    // ★ 3択対応（サーバがまだ2択なら understood/notUnderstood を拾う）
-    const pos = Number(data.positive ?? data.understood ?? 0);         // 気になる
-    const neu = Number(data.neutral ?? 0);                              // 普通
-    const neg = Number(data.negative ?? data.notUnderstood ?? 0);       // 気にならない
+    // /api/results 互換：understood=気になる, notUnderstood=気にならない, neutral=普通
+    const pos = Number(data.interested ?? data.positive ?? data.understood ?? 0);
+    const neu = Number(data.neutral ?? 0);
+    const neg = Number(data.notInterested ?? data.negative ?? data.notUnderstood ?? 0);
 
     const total = pos + neu + neg;
 
-    // 既存の表示欄は維持（num-understood = 気になる、num-not-understood = 気にならない）
+    // 表示
     numUnderstood.textContent = String(pos);
     numNotUnderstood.textContent = String(neg);
     numTotal.textContent = String(total);
-
-    // 普通の表示欄がHTMLにある場合のみ反映
     if (numNeutral) numNeutral.textContent = String(neu);
 
-    const maxP = Number(data.maxParticipants ?? 0);
-    const theme = data.theme || "";
-
-    const rate = calcInterestRate(pos, neg, maxP);
+    // ✅ 平均スコア方式で興味度%
+    const rate = calcInterestRateAvg(pos, neu, neg);
     rateUnderstood.textContent = rate === null ? "--%" : `${Math.round(rate)}%`;
 
+    // 想定人数は「進捗表示用」として残す（計算には使わない）
+    const maxP = Number(data.maxParticipants ?? 0);
     if (document.activeElement !== maxInput) maxInput.value = maxP;
+
     if (Number(maxP) > 0) {
       maxInfo.textContent = `想定人数：${maxP}人中、${total}人が投票済み`;
     } else {
       maxInfo.textContent = `想定人数が未設定です（先に人数を保存してください）`;
     }
 
+    // テーマ
+    const theme = data.theme || "";
     themeInfo.textContent = theme ? `現在のテーマ：${theme}` : "現在のテーマ：未設定";
     if (document.activeElement !== themeInput) themeInput.value = theme;
 
-    // ★ 現在セッションのコメントを保持（リセット直前の保存に使う）
+    // コメント
     latestCurrentComments = normalizeComments(data.comments || []);
-
-    // ★ タイムライン描画（現在 + 過去保存分）
     renderCommentTimeline(latestCurrentComments);
 
+    // グラフ点追加（rateがnullなら追加しない）
     addRatePoint(rate);
 
     if (!animationStarted) {
@@ -219,17 +241,7 @@ function drawLineChart() {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
 
-  const maxP = Number(maxInput.value || "0");
-  if (maxP <= 0) {
-    ctx.fillStyle = "#CCCCCC";
-    ctx.font = "32px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("想定人数を設定してください（左の『人数を保存』）", w / 2, h / 2);
-    requestAnimationFrame(drawLineChart);
-    return;
-  }
-
+  // 注意表示：投票が無いとデータ無し
   if (history.length === 0) {
     ctx.fillStyle = "#CCCCCC";
     ctx.font = "32px sans-serif";
@@ -244,6 +256,7 @@ function drawLineChart() {
   const plotW = w - L - R;
   const plotH = h - T - B;
 
+  // 枠
   ctx.strokeStyle = "#FFFFFF";
   ctx.lineWidth = 4;
   ctx.setLineDash([]);
@@ -253,6 +266,7 @@ function drawLineChart() {
   ctx.lineTo(w - R, h - B);
   ctx.stroke();
 
+  // 横線
   const yTicks = [0, 25, 50, 75, 100];
   ctx.font = "28px sans-serif";
   ctx.textAlign = "right";
@@ -275,6 +289,7 @@ function drawLineChart() {
     ctx.fillText(v + "%", L - 10, y);
   });
 
+  // 縦点線
   ctx.strokeStyle = "#666666";
   ctx.lineWidth = 2;
   ctx.setLineDash([10, 10]);
@@ -287,6 +302,7 @@ function drawLineChart() {
   });
   ctx.setLineDash([]);
 
+  // 線
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
   const currentColor = getCurrentColor();
 
@@ -295,7 +311,7 @@ function drawLineChart() {
   ctx.beginPath();
 
   history.forEach((p, i) => {
-    const displayRate = i === 0 ? 0 : p.rate;
+    const displayRate = i === 0 ? p.rate : p.rate; // 0固定をやめ、初回から反映
     const x = L + i * stepX;
     const y = valueToY(displayRate, h, B, plotH);
     if (i === 0) ctx.moveTo(x, y);
@@ -303,11 +319,12 @@ function drawLineChart() {
   });
   ctx.stroke();
 
+  // タイトル
   ctx.font = "32px sans-serif";
   ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.fillText("現在セッション興味率推移（(気になる−気にならない)/想定人数）", L + 4, 8);
+  ctx.fillText("現在セッション興味度推移（平均スコア：気になる=+1 / 普通=0 / 気にならない=-1）", L + 4, 8);
 
   requestAnimationFrame(drawLineChart);
 }
@@ -340,11 +357,11 @@ function drawPrevSessions() {
       continue;
     }
 
-    if (note) note.textContent = `${session.resetNo}回目のリセットセッション：興味率の推移（0〜100％）`;
+    if (note) note.textContent = `${session.resetNo}回目のリセットセッション：興味度の推移（0〜100％）`;
 
     if (rateLabel) {
-      const lastRate = Math.max(0, Math.min(100, Number(session.finalRate ?? 0)));
-      rateLabel.textContent = `（最終興味率：${Math.round(lastRate)}%）`;
+      const lastRate = clamp100(Number(session.finalRate ?? 0));
+      rateLabel.textContent = `（最終興味度：${Math.round(lastRate)}%）`;
     }
 
     const hist = session.points;
@@ -404,9 +421,8 @@ function drawPrevSessions() {
     pctx.beginPath();
 
     hist.forEach((p, idx) => {
-      const displayRate = idx === 0 ? 0 : p.rate;
       const x = L + idx * stepX;
-      const y = valueToY(displayRate, h, B, plotH);
+      const y = valueToY(p.rate, h, B, plotH);
       if (idx === 0) pctx.moveTo(x, y);
       else pctx.lineTo(x, y);
     });
@@ -438,10 +454,13 @@ function drawSessionChain() {
 
   const chainPoints = [];
   const firstSessionColor = sessionsOldestFirst[0].color || SESSION_COLORS[0];
-  chainPoints.push({ rate: 0, color: firstSessionColor, isSessionPoint: false });
+
+  // 始点も「そのセッションの最初の値」に寄せたければ 0 ではなく 50 を推奨。
+  // ここは連結の見た目優先で 50% スタートにしておく（普通=0の基準点）
+  chainPoints.push({ rate: 50, color: firstSessionColor, isSessionPoint: false });
 
   sessionsOldestFirst.forEach((session, idx) => {
-    const r = Math.max(0, Math.min(100, Number(session.finalRate ?? 0)));
+    const r = clamp100(Number(session.finalRate ?? 0));
     const color = session.color || SESSION_COLORS[Math.min(idx, SESSION_COLORS.length - 1)];
     chainPoints.push({ rate: r, color, isSessionPoint: true });
   });
@@ -533,11 +552,10 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#FFFFFF";
   sessionChainCtx.textAlign = "left";
   sessionChainCtx.textBaseline = "top";
-  sessionChainCtx.fillText("セッション1→2→3→4 最終興味率 連結グラフ", L, 60);
+  sessionChainCtx.fillText("セッション1→2→3→4 最終興味度 連結グラフ（平均スコア）", L, 60);
 }
 
 // ==== コメント表示（現在 + 過去保存分を統合） ====
-// ★ セッション色で判別できるように「左線＆丸」を色付け
 function renderCommentTimeline(currentComments) {
   commentList.innerHTML = "";
 
@@ -551,7 +569,7 @@ function renderCommentTimeline(currentComments) {
     sessionOrder: 999999,
   }));
 
-  // 2) 過去セッション分（保存済み）
+  // 2) 過去セッション分
   const pastItems = [];
   prevSessions.forEach(s => {
     const label = `${s.resetNo}回目のリセットセッション`;
@@ -577,7 +595,7 @@ function renderCommentTimeline(currentComments) {
     return;
   }
 
-  // 新しい順に並べる
+  // 新しい順
   all.sort((a, b) => safeTs(b.ts) - safeTs(a.ts));
 
   all.forEach(c => {
@@ -605,7 +623,7 @@ function renderCommentTimeline(currentComments) {
     sessionSpan.style.color = c.sessionColor;
     sessionSpan.style.fontWeight = "700";
 
-    // ★ 3択タグ
+    // 3択タグ
     const tag = document.createElement("span");
     const ch = normalizeChoice(c.choice);
     if (ch === "positive") {
@@ -705,12 +723,10 @@ if (btnReset) {
       const currentColor = getCurrentColor();
 
       if (history.length > 0) {
-        const lastRate = Math.max(0, Math.min(100, history[history.length - 1].rate));
+        const lastRate = clamp100(history[history.length - 1].rate);
         const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
 
         const resetNo = resetCount + 1;
-
-        // ★ リセット直前の「現在コメント」を保存
         const savedComments = normalizeComments(latestCurrentComments);
 
         prevSessions.unshift({
@@ -725,9 +741,7 @@ if (btnReset) {
 
         drawPrevSessions();
         drawSessionChain();
-
-        // ★ サーバ消去前に過去分として反映
-        renderCommentTimeline([]);
+        renderCommentTimeline([]); // いったん現在コメント無しとして表示（過去分は残る）
       }
 
       const res = await fetch("/api/admin/reset", { method: "POST" });
@@ -805,3 +819,6 @@ function unlock() {
   drawPrevSessions();
   drawSessionChain();
 }
+
+
+ 
