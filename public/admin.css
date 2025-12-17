@@ -1,11 +1,13 @@
+/* =========================
+   共通（投票者画面：白ベース）
+   ========================= */
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #f5f5f5;
   color: #333;
 }
@@ -124,7 +126,7 @@ canvas {
   text-align: right;
 }
 
-/* 管理画面ロック */
+/* 管理画面ロック（旧ID系：残しておく） */
 #lock-screen {
   margin-top: 16px;
 }
@@ -151,7 +153,7 @@ canvas {
   resize: vertical;
 }
 
-/* コメント表示欄（管理画面） */
+/* コメント表示欄（投票/簡易管理 共通） */
 .comment-box {
   margin-top: 32px;
   padding-top: 16px;
@@ -179,7 +181,6 @@ canvas {
   margin-top: 8px;
   margin-bottom: 8px;
 }
-
 
 .comment-meta {
   display: flex;
@@ -210,14 +211,17 @@ canvas {
   }
 }
 
-/* ========== 管理画面用 近未来デザイン ========== */
+/* =========================
+   管理画面（admin-*）：白ベース＆黒文字
+   ※ここから下が管理画面専用
+   ========================= */
 
 .admin-body {
   margin: 0;
   min-height: 100vh;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: radial-gradient(circle at top, #111827 0, #020617 45%, #000 100%);
-  color: #e5e7eb;
+  background: #f7f7fb;          /* 明るい背景 */
+  color: #111827;               /* 黒寄り文字 */
 }
 
 /* ロック画面 */
@@ -227,7 +231,7 @@ canvas {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at top, rgba(15,23,42,0.95), rgba(0,0,0,0.98));
+  background: rgba(245, 246, 250, 0.96);
   z-index: 50;
 }
 
@@ -236,10 +240,10 @@ canvas {
   max-width: 90vw;
   padding: 32px 28px;
   border-radius: 18px;
-background: rgba(15,23,42,0.9);
-  border: 1px solid rgba(148,163,184,0.4);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.8);
-  backdrop-filter: blur(18px);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.10);
+  backdrop-filter: blur(8px);
   text-align: center;
 }
 
@@ -247,7 +251,7 @@ background: rgba(15,23,42,0.9);
   margin: 0 0 8px;
   font-size: 22px;
   letter-spacing: 0.08em;
-  background: linear-gradient(120deg, #38bdf8, #a855f7);
+  background: linear-gradient(120deg, #2563eb, #7c3aed);
   -webkit-background-clip: text;
   color: transparent;
 }
@@ -255,38 +259,46 @@ background: rgba(15,23,42,0.9);
 .lock-desc {
   margin: 0 0 16px;
   font-size: 13px;
-  color: #9ca3af;
+  color: #4b5563;
 }
 
-.input-text {
+.lock-message {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #b91c1c;
+}
+
+/* 管理画面入力 */
+.admin-body .input-text {
   width: 100%;
   padding: 10px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(148,163,184,0.6);
-  background: rgba(15,23,42,0.8);
-  color: #e5e7eb;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
   font-size: 14px;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
 
-.input-text::placeholder {
-  color: #6b7280;
+.admin-body .input-text::placeholder {
+  color: #9ca3af;
 }
 
-.input-text:focus {
-  border-color: #38bdf8;
-  box-shadow: 0 0 0 1px rgba(56,189,248,0.5);
-  background: rgba(15,23,42,1);
+.admin-body .input-text:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  background: #ffffff;
 }
 
-.btn {
+/* 管理画面ボタン（投票画面の .btn と共存） */
+.admin-body .btn {
   border: none;
   cursor: pointer;
   border-radius: 999px;
- padding: 9px 18px;
+  padding: 9px 18px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.03em;
   transition: transform 0.08s ease-out, box-shadow 0.12s, background 0.12s, color 0.12s;
   display: inline-flex;
@@ -295,51 +307,45 @@ background: rgba(15,23,42,0.9);
   gap: 6px;
 }
 
-.btn.primary {
+.admin-body .btn.primary {
   margin-top: 14px;
   width: 100%;
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  background: linear-gradient(135deg, #2563eb, #6366f1);
   color: white;
-  box-shadow: 0 15px 40px rgba(37,99,235,0.65);
+  box-shadow: 0 12px 28px rgba(37,99,235,0.25);
 }
 
-.btn.primary:hover {
+.admin-body .btn.primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 18px 50px rgba(37,99,235,0.8);
+  box-shadow: 0 16px 36px rgba(37,99,235,0.30);
 }
 
-.btn.ghost {
-  background: rgba(15,23,42,0.8);
-  color: #e5e7eb;
-  border: 1px solid rgba(148,163,184,0.7);
+.admin-body .btn.ghost {
+  background: #ffffff;
+  color: #111827;
+  border: 1px solid #d1d5db;
 }
 
-.btn.ghost:hover {
-  background: rgba(31,41,55,0.95);
+.admin-body .btn.ghost:hover {
+  background: #f3f4f6;
 }
 
-.btn.danger {
+.admin-body .btn.danger {
   background: linear-gradient(135deg, #f97316, #ef4444);
   color: #fff;
-  box-shadow: 0 14px 40px rgba(248,113,113,0.5);
+  box-shadow: 0 12px 28px rgba(239,68,68,0.22);
 }
 
-.btn.danger:hover {
+.admin-body .btn.danger:hover {
   transform: translateY(-1px);
-  box-shadow: 0 18px 55px rgba(248,113,113,0.7);
+  box-shadow: 0 16px 36px rgba(239,68,68,0.26);
 }
 
-.btn.wide {
+.admin-body .btn.wide {
   width: 100%;
-}
-.lock-message {
-  margin-top: 10px;
-  font-size: 13px;
-  color: #fca5a5;
 }
 
 /* 管理画面シェル */
-
 .admin-shell {
   position: relative;
   min-height: 100vh;
@@ -351,9 +357,9 @@ background: rgba(15,23,42,0.9);
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(circle at 0% 0%, rgba(56,189,248,0.17), transparent 55%),
-    radial-gradient(circle at 100% 100%, rgba(168,85,247,0.15), transparent 55%);
-  opacity: 0.7;
+    radial-gradient(circle at 0% 0%, rgba(59,130,246,0.10), transparent 55%),
+    radial-gradient(circle at 100% 100%, rgba(168,85,247,0.08), transparent 55%);
+  opacity: 1;
   pointer-events: none;
   z-index: -1;
 }
@@ -369,40 +375,42 @@ background: rgba(15,23,42,0.9);
 .admin-title {
   margin: 0;
   font-size: 22px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
+  color: #111827;
 }
 
 .admin-subtitle {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #9ca3af;
+  color: #4b5563;
 }
 
 .time-indicator {
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(15,23,42,0.8);
-  border: 1px solid rgba(148,163,184,0.5);
-  color: #e5e7eb;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  color: #111827;
 }
 
+/* レイアウト */
 .admin-main {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 18px;
 }
 
-/* 汎用カード */
-
+/* カード */
 .card {
   position: relative;
   padding: 16px 18px 18px;
   border-radius: 18px;
-  background: rgba(15,23,42,0.92);
-  border: 1px solid rgba(148,163,184,0.3);
-  box-shadow: 0 16px 35px rgba(15,23,42,0.9);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 14px 30px rgba(0,0,0,0.08);
   margin-bottom: 14px;
+  color: #111827;
 }
 
 .card.large {
@@ -410,23 +418,24 @@ background: rgba(15,23,42,0.9);
 }
 
 .card.neon {
-  border-color: rgba(56,189,248,0.7);
-  box-shadow: 0 18px 40px rgba(56,189,248,0.25);
+  border-color: rgba(37,99,235,0.40);
+  box-shadow: 0 14px 35px rgba(37,99,235,0.10);
 }
 
 .card.danger {
-  border-color: rgba(248,113,113,0.9);
+  border-color: rgba(239,68,68,0.45);
 }
 
 .card-title {
   margin: 0 0 6px;
   font-size: 15px;
+  color: #111827;
 }
 
 .card-caption {
   margin: 0 0 10px;
   font-size: 12px;
-  color: #9ca3af;
+  color: #6b7280;
 }
 
 .card-header-row {
@@ -437,7 +446,6 @@ background: rgba(15,23,42,0.9);
 }
 
 /* 左カラム */
-
 .admin-panel .card:not(:last-child) {
   margin-bottom: 14px;
 }
@@ -453,12 +461,11 @@ background: rgba(15,23,42,0.9);
   flex: 1;
 }
 
-.input-text.small {
+.admin-body .input-text.small {
   width: 110px;
 }
 
-/* 右カラム：ダッシュボード */
-
+/* 右カラム */
 .admin-dashboard {
   display: flex;
   flex-direction: column;
@@ -466,7 +473,6 @@ background: rgba(15,23,42,0.9);
 }
 
 /* サマリーカード */
-
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -474,96 +480,96 @@ background: rgba(15,23,42,0.9);
   margin-bottom: 4px;
 }
 
-.summary-card {
- padding: 10px 12px;
+.summary-card,
+.summary-card.accent {
+  padding: 10px 12px;
   border-radius: 14px;
-  background: radial-gradient(circle at top left, rgba(15,118,110,0.25), rgba(15,23,42,0.9));
-  border: 1px solid rgba(148,163,184,0.4);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   display: grid;
   grid-template-rows: auto 1fr auto;
-}
-
-.summary-card.accent {
-  background: radial-gradient(circle at top right, rgba(56,189,248,0.35), rgba(15,23,42,0.9));
-  border-color: rgba(56,189,248,0.8);
+  color: #111827;
 }
 
 .summary-card .label {
   font-size: 11px;
-  color: #9ca3af;
+  color: #6b7280;
 }
 
 .summary-card .value {
   font-size: 22px;
-  font-weight: 600;
+  font-weight: 700;
   margin-top: 2px;
+  color: #111827;
 }
 
 .summary-card .unit {
   font-size: 11px;
   justify-self: flex-end;
-  color: #9ca3af;
+  color: #6b7280;
 }
 
-/* コメント */
-
-.comment-list {
+/* コメント（管理画面） */
+.admin-body .comment-list {
   max-height: 260px;
   overflow-y: auto;
   padding-right: 4px;
 }
 
-.comment-item {
+.admin-body .comment-item {
   padding: 8px 10px;
   border-radius: 10px;
-  background: rgba(15,23,42,0.85);
-  border: 1px solid rgba(55,65,81,0.9);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   margin-bottom: 8px;
+  color: #111827;
 }
 
-.comment-meta {
+.admin-body .comment-meta {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 4px;
 }
 
-.comment-tag {
+.admin-body .comment-meta span:last-child {
   font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
+  color: #6b7280;
 }
 
-.comment-tag.understood {
-  background: rgba(16,185,129,0.18);
-  color: #6ee7b7;
-}
-
-.comment-tag.not-understood {
-  background: rgba(248,113,113,0.18);
-  color: #fecaca;
-}
-
-.comment-meta span:last-child {
-  font-size: 11px;
-  color: #9ca3af;
-}
-
-.comment-item > div:last-child {
+.admin-body .comment-item > div:last-child {
   font-size: 13px;
 }
 
-/* キャンバス */
+/* タグ（管理画面用：淡色＋黒寄り） */
+.admin-body .comment-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
 
+.admin-body .comment-tag.understood {
+  background: rgba(16,185,129,0.14);
+  color: #065f46;
+}
+
+.admin-body .comment-tag.not-understood {
+  background: rgba(239,68,68,0.14);
+  color: #7f1d1d;
+}
+
+/* キャンバス（管理画面：枠だけ白系）
+   ※JSで黒塗りしている場合は、JS側も白に変えてください */
 .admin-body canvas {
   display: block;
   width: 100%;
   border-radius: 12px;
-  background: radial-gradient(circle at top, #020617, #020617);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
 }
 
 /* レスポンシブ */
-
 @media (max-width: 900px) {
   .admin-main {
     grid-template-columns: 1fr;
