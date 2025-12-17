@@ -106,15 +106,22 @@
       <section class="admin-dashboard">
 
         <!-- サマリー -->
+        <!-- ★変更点：普通（neutral）カードを追加 -->
         <div class="summary-grid">
           <div class="summary-card">
-            <span class="label">興味がある</span>
+            <span class="label">気になる</span>
             <span id="num-understood" class="value">0</span>
             <span class="unit">票</span>
           </div>
 
           <div class="summary-card">
-            <span class="label">あまり興味がない</span>
+            <span class="label">普通</span>
+            <span id="num-neutral" class="value">0</span>
+            <span class="unit">票</span>
+          </div>
+
+          <div class="summary-card">
+            <span class="label">気にならない</span>
             <span id="num-not-understood" class="value">0</span>
             <span class="unit">票</span>
           </div>
@@ -134,7 +141,7 @@
         <!-- 現在セッション -->
         <div class="card large">
           <div class="card-header-row">
-            <h2 class="card-title">興味度（興味がある − あまり興味がない）の推移</h2>
+            <h2 class="card-title">興味度（気になる − 気にならない）の推移</h2>
             <span class="card-caption">リアルタイム更新</span>
           </div>
 
