@@ -2,6 +2,7 @@
 // 投票結果＋コメント＋履歴（興味度グラフ用）＋秘密キー付きURL制限
 // ★ 3択対応：interested / neutral / not-interested
 // ★ 管理画面互換のため /api/results は understood=interested, notUnderstood=not-interested を返す
+// ★ 重要：comments.ts は "数値(ms)" で返す（admin.js の safeTs が Number() 前提のため）
 
 const express = require("express");
 const path = require("path");
@@ -24,8 +25,7 @@ const store = {
   // choice: "interested" | "neutral" | "not-interested" | null
   comments: [],
 
-  // 履歴（累計値）
-  // { ts, interested, neutral, notInterested }
+  // 履歴（累計値） { ts, interested, neutral, notInterested }
   history: [],
 
   theme: ""
@@ -69,42 +69,57 @@ app.get("/admin.html", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
+// ===== ユーティリティ =====
+const VALID_CHOICES = ["interested", "neutral", "not-interested"];
+
+// 管理画面の既存 admin.js が理解しやすい choice へ変換
+function toAdminChoice(choice) {
+  if (choice === "interested") return "understood";
+  if (choice === "not-interested") return "not-understood";
+  if (choice === "neutral") return "neutral";
+  return null; // コメントのみ等
+}
+
+function nowMs() {
+  return Date.now();
+}
+
 // ===== API =====
 
 // 投票 API（3択）
+// ※ choice が無い場合は「コメントのみ」として扱えるようにしておく（堅牢化）
 app.post("/api/vote", (req, res) => {
   try {
     const { choice, comment } = req.body || {};
+    const ts = nowMs();
 
-    // choice バリデーション
-    const validChoices = ["interested", "neutral", "not-interested"];
-    if (!validChoices.includes(choice)) {
-      return res.status(400).json({ success: false, error: "invalid choice" });
+    // choice がある場合のみ投票としてカウント
+    if (choice != null) {
+      if (!VALID_CHOICES.includes(choice)) {
+        return res.status(400).json({ success: false, error: "invalid choice" });
+      }
+
+      if (choice === "interested") store.interested += 1;
+      else if (choice === "neutral") store.neutral += 1;
+      else if (choice === "not-interested") store.notInterested += 1;
+
+      // 履歴（累計値）
+      store.history.push({
+        ts,
+        interested: store.interested,
+        neutral: store.neutral,
+        notInterested: store.notInterested
+      });
     }
-
-    // カウント更新
-    if (choice === "interested") store.interested += 1;
-    if (choice === "neutral") store.neutral += 1;
-    if (choice === "not-interested") store.notInterested += 1;
-
-    const now = new Date().toISOString();
 
     // コメント保存（任意）
     if (comment && typeof comment === "string" && comment.trim().length > 0) {
       store.comments.push({
-        choice, // "interested" | "neutral" | "not-interested"
+        choice: choice ?? null,
         text: comment.trim(),
-        ts: now
+        ts
       });
     }
-
-    // 履歴に「累計値」を記録（必要なら利用）
-    store.history.push({
-      ts: now,
-      interested: store.interested,
-      neutral: store.neutral,
-      notInterested: store.notInterested
-    });
 
     res.json({ success: true });
   } catch (e) {
@@ -114,7 +129,6 @@ app.post("/api/vote", (req, res) => {
 });
 
 // コメント単体送信用 API（互換用）
-// POST /api/comment { text: "～～～" }
 app.post("/api/comment", (req, res) => {
   try {
     const { text } = req.body || {};
@@ -122,13 +136,12 @@ app.post("/api/comment", (req, res) => {
       return res.status(400).json({ success: false, error: "empty comment" });
     }
 
-    const now = new Date().toISOString();
+    const ts = nowMs();
 
-    // choice はコメントのみなら null
     store.comments.push({
       choice: null,
       text: text.trim(),
-      ts: now
+      ts
     });
 
     return res.json({ success: true });
@@ -155,7 +168,6 @@ app.post("/api/admin/max-participants", (req, res) => {
 
 // 管理者用：投票データをリセット（現在セッションのみ）
 app.post("/api/admin/reset", (req, res) => {
-  // 票・コメント・履歴のみ消す（想定人数とテーマは残す）
   store.interested = 0;
   store.neutral = 0;
   store.notInterested = 0;
@@ -185,21 +197,37 @@ app.post("/api/admin/reset-all", (req, res) => {
 app.get("/api/results", (req, res) => {
   const total = store.interested + store.neutral + store.notInterested;
 
-  // ★ 管理画面互換：understood / notUnderstood を返す
+  // ★ 管理画面互換：understood / notUnderstood
   const understood = store.interested;        // +1側
   const notUnderstood = store.notInterested;  // -1側
-  const neutral = store.neutral;              // 0側（追加）
+  const neutral = store.neutral;              // 0側
 
-  const comments = store.comments.slice(-100);
-  const history = store.history.slice(-200);
+  // ★ admin.js が扱いやすい形に整形して返す
+  //  - ts は数値(ms)
+  //  - choice は understood / not-understood / neutral / null
+  const comments = store.comments.slice(-200).map(c => ({
+    choice: toAdminChoice(c.choice),
+    // 互換：admin.js は text を見ているので text を必ず入れる
+    text: String(c.text ?? ""),
+    ts: Number.isFinite(Number(c.ts)) ? Number(c.ts) : nowMs(),
+    // デバッグ用に元 choice も返しておく（不要なら消してOK）
+    rawChoice: c.choice ?? null
+  }));
 
-  // 参考：投票割合（以前の互換項目。使ってなければ無視OK）
+  // history も数値 ts を保証
+  const history = store.history.slice(-400).map(h => ({
+    ts: Number.isFinite(Number(h.ts)) ? Number(h.ts) : nowMs(),
+    interested: h.interested ?? 0,
+    neutral: h.neutral ?? 0,
+    notInterested: h.notInterested ?? 0
+  }));
+
   const rateUnderstood = total > 0 ? understood / total : 0;
 
   res.json({
     understood,
     notUnderstood,
-    neutral, // ★追加
+    neutral,
 
     total,
     rateUnderstood,
@@ -230,7 +258,5 @@ app.get("/api/theme", (req, res) => {
 // ===== サーバー起動 =====
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  console.log(
-    `投票ページURLの例: http://localhost:${PORT}/vote.html?key=${ACCESS_KEY}`
-  );
+  console.log(`投票ページURLの例: http://localhost:${PORT}/vote.html?key=${ACCESS_KEY}`);
 });
