@@ -2,12 +2,13 @@
 // admin.js（興味率：カード/現在/過去/連結 + コメント保存＆色分け）
 // ===============================
 //
-// ✅ 平均スコア方式（普通でもグラフが動く）
+// ✅ 平均スコア方式（普通でもグラフが動く） + ✅ 0地点スタート
 // - 気になる: +1
 // - 普通: 0
 // - 気にならない: -1
 // - 平均スコア = (気になる - 気にならない) / 全投票数
 // - 表示% = (平均スコア + 1) / 2 * 100 （0〜100に丸め）
+// - ただし「グラフの開始点」は 0% から始める（投票前の基準点）
 // - /api/results 互換: understood=気になる, notUnderstood=気にならない, neutral=普通
 // - コメントchoice互換: interested/neutral/not-interested, understood/not-understood も吸収
 //
@@ -91,17 +92,13 @@ let animationStarted = false;
 // ★ 最新取得した「現在セッションのコメント」（リセット直前に退避する）
 let latestCurrentComments = [];
 
+// ★ 0地点スタート用：初期点を入れたか
+let basePointInserted = false;
+
 // ==== ユーティリティ ====
 function getCurrentColor() {
   const idx = Math.min(resetCount, SESSION_COLORS.length - 1);
   return SESSION_COLORS[idx];
-}
-
-function clamp01(x) {
-  if (!Number.isFinite(x)) return 0;
-  if (x < 0) return 0;
-  if (x > 1) return 1;
-  return x;
 }
 
 function clamp100(x) {
@@ -151,17 +148,26 @@ function normalizeComments(comments) {
     .filter(c => c.text.trim().length > 0 || c.ts);
 }
 
-// ✅ 平均スコア方式
+// ✅ 平均スコア方式（0〜100%）
 // 平均スコア = (pos - neg) / totalVotes
 // 表示% = (avg + 1)/2 * 100
 function calcInterestRateAvg(pos, neu, neg) {
   const totalVotes = (Number(pos) || 0) + (Number(neu) || 0) + (Number(neg) || 0);
   if (totalVotes <= 0) return null;
 
-  const scoreSum = (Number(pos) || 0) - (Number(neg) || 0); // +1*pos + 0*neu -1*neg
+  const scoreSum = (Number(pos) || 0) - (Number(neg) || 0);
   const avg = scoreSum / totalVotes; // -1..+1
   const pct = (avg + 1) / 2; // 0..1
   return clamp100(pct * 100);
+}
+
+// ✅ 0地点スタート：まだ点が無いときに 0% を1点入れる
+function ensureBasePoint() {
+  if (basePointInserted) return;
+  if (history.length > 0) return;
+
+  history.push({ ts: Date.now(), rate: 0 });
+  basePointInserted = true;
 }
 
 // ==== 結果取得 ====
@@ -185,11 +191,11 @@ async function fetchResults() {
     numTotal.textContent = String(total);
     if (numNeutral) numNeutral.textContent = String(neu);
 
-    // ✅ 平均スコア方式で興味度%
+    // 興味度%（平均スコア方式）
     const rate = calcInterestRateAvg(pos, neu, neg);
     rateUnderstood.textContent = rate === null ? "--%" : `${Math.round(rate)}%`;
 
-    // 想定人数は「進捗表示用」として残す（計算には使わない）
+    // 想定人数は「進捗表示用」
     const maxP = Number(data.maxParticipants ?? 0);
     if (document.activeElement !== maxInput) maxInput.value = maxP;
 
@@ -208,8 +214,13 @@ async function fetchResults() {
     latestCurrentComments = normalizeComments(data.comments || []);
     renderCommentTimeline(latestCurrentComments);
 
-    // グラフ点追加（rateがnullなら追加しない）
-    addRatePoint(rate);
+    // ✅ 0地点スタート：投票が始まる前に基準点を入れる（合計0票の間）
+    if (total === 0) {
+      ensureBasePoint();
+    } else {
+      // 投票が始まったら、以後は通常通り rate を追加
+      addRatePoint(rate);
+    }
 
     if (!animationStarted) {
       animationStarted = true;
@@ -241,16 +252,8 @@ function drawLineChart() {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
 
-  // 注意表示：投票が無いとデータ無し
-  if (history.length === 0) {
-    ctx.fillStyle = "#CCCCCC";
-    ctx.font = "32px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("データがありません。", w / 2, h / 2);
-    requestAnimationFrame(drawLineChart);
-    return;
-  }
+  // ✅ 0地点スタート：まだ何も無いときは0点を作っておく（表示安定）
+  if (history.length === 0) ensureBasePoint();
 
   const L = 60, R = 40, T = 40, B = 80;
   const plotW = w - L - R;
@@ -311,9 +314,8 @@ function drawLineChart() {
   ctx.beginPath();
 
   history.forEach((p, i) => {
-    const displayRate = i === 0 ? p.rate : p.rate; // 0固定をやめ、初回から反映
     const x = L + i * stepX;
-    const y = valueToY(displayRate, h, B, plotH);
+    const y = valueToY(p.rate, h, B, plotH);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -324,7 +326,7 @@ function drawLineChart() {
   ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.fillText("現在セッション興味度推移（平均スコア：気になる=+1 / 普通=0 / 気にならない=-1）", L + 4, 8);
+  ctx.fillText("現在セッション興味度推移（0%スタート / 平均スコア方式）", L + 4, 8);
 
   requestAnimationFrame(drawLineChart);
 }
@@ -364,7 +366,9 @@ function drawPrevSessions() {
       rateLabel.textContent = `（最終興味度：${Math.round(lastRate)}%）`;
     }
 
-    const hist = session.points;
+    // ✅ 過去セッションも「0%開始点」を強制的に1点追加して描画
+    const orig = session.points || [];
+    const hist = [{ ts: orig[0]?.ts ?? Date.now(), rate: 0 }, ...orig];
     const color = session.color || "#4fc3f7";
 
     const L = 60, R = 40, T = 40, B = 60;
@@ -441,7 +445,10 @@ function drawSessionChain() {
   sessionChainCtx.fillRect(0, 0, w, h);
 
   const sessionsNewestFirst = prevSessions.slice(0, 4);
-  const sessionsOldestFirst = sessionsNewestFirst.slice().reverse().filter(s => s && s.points && s.points.length > 0);
+  const sessionsOldestFirst = sessionsNewestFirst
+    .slice()
+    .reverse()
+    .filter(s => s && s.points && s.points.length > 0);
 
   if (sessionsOldestFirst.length === 0) {
     sessionChainCtx.fillStyle = "#CCCCCC";
@@ -455,9 +462,8 @@ function drawSessionChain() {
   const chainPoints = [];
   const firstSessionColor = sessionsOldestFirst[0].color || SESSION_COLORS[0];
 
-  // 始点も「そのセッションの最初の値」に寄せたければ 0 ではなく 50 を推奨。
-  // ここは連結の見た目優先で 50% スタートにしておく（普通=0の基準点）
-  chainPoints.push({ rate: 50, color: firstSessionColor, isSessionPoint: false });
+  // ✅ 連結も「0%スタート」にする
+  chainPoints.push({ rate: 0, color: firstSessionColor, isSessionPoint: false });
 
   sessionsOldestFirst.forEach((session, idx) => {
     const r = clamp100(Number(session.finalRate ?? 0));
@@ -552,7 +558,7 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#FFFFFF";
   sessionChainCtx.textAlign = "left";
   sessionChainCtx.textBaseline = "top";
-  sessionChainCtx.fillText("セッション1→2→3→4 最終興味度 連結グラフ（平均スコア）", L, 60);
+  sessionChainCtx.fillText("セッション1→2→3→4 最終興味度 連結グラフ（0%スタート）", L, 60);
 }
 
 // ==== コメント表示（現在 + 過去保存分を統合） ====
@@ -561,7 +567,6 @@ function renderCommentTimeline(currentComments) {
 
   const currentColor = getCurrentColor();
 
-  // 1) 現在セッション分
   const nowItems = (normalizeComments(currentComments) || []).map(c => ({
     ...c,
     sessionLabel: "現在セッション",
@@ -569,7 +574,6 @@ function renderCommentTimeline(currentComments) {
     sessionOrder: 999999,
   }));
 
-  // 2) 過去セッション分
   const pastItems = [];
   prevSessions.forEach(s => {
     const label = `${s.resetNo}回目のリセットセッション`;
@@ -595,7 +599,6 @@ function renderCommentTimeline(currentComments) {
     return;
   }
 
-  // 新しい順
   all.sort((a, b) => safeTs(b.ts) - safeTs(a.ts));
 
   all.forEach(c => {
@@ -606,7 +609,6 @@ function renderCommentTimeline(currentComments) {
     const meta = document.createElement("div");
     meta.className = "comment-meta";
 
-    // セッション色の丸
     const dot = document.createElement("span");
     dot.style.display = "inline-block";
     dot.style.width = "10px";
@@ -616,14 +618,12 @@ function renderCommentTimeline(currentComments) {
     dot.style.marginRight = "8px";
     dot.style.verticalAlign = "middle";
 
-    // セッション名
     const sessionSpan = document.createElement("span");
     sessionSpan.textContent = c.sessionLabel;
     sessionSpan.style.marginRight = "10px";
     sessionSpan.style.color = c.sessionColor;
     sessionSpan.style.fontWeight = "700";
 
-    // 3択タグ
     const tag = document.createElement("span");
     const ch = normalizeChoice(c.choice);
     if (ch === "positive") {
@@ -637,7 +637,6 @@ function renderCommentTimeline(currentComments) {
       tag.textContent = "気にならない";
     }
 
-    // 時刻
     const time = document.createElement("span");
     let timeText = "";
     try { timeText = new Date(safeTs(c.ts)).toLocaleString("ja-JP"); }
@@ -713,7 +712,6 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
-// ★ resetNo と「その時点のコメント」も保存する
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
     const ok = confirm("現在セッションの票・コメント・グラフをリセットします。\n本当に実行しますか？");
@@ -741,7 +739,7 @@ if (btnReset) {
 
         drawPrevSessions();
         drawSessionChain();
-        renderCommentTimeline([]); // いったん現在コメント無しとして表示（過去分は残る）
+        renderCommentTimeline([]);
       }
 
       const res = await fetch("/api/admin/reset", { method: "POST" });
@@ -750,6 +748,7 @@ if (btnReset) {
       resetCount++;
       history = [];
       latestCurrentComments = [];
+      basePointInserted = false;
 
       await fetchResults();
       drawPrevSessions();
@@ -777,6 +776,7 @@ if (btnResetAll) {
       prevSessions = [];
       resetCount = 0;
       latestCurrentComments = [];
+      basePointInserted = false;
 
       drawPrevSessions();
       drawSessionChain();
@@ -819,6 +819,3 @@ function unlock() {
   drawPrevSessions();
   drawSessionChain();
 }
-
-
- 
