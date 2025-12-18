@@ -3,8 +3,9 @@
 // ===============================
 //
 // ✅ 平均スコア方式（普通でもグラフが動く） + ✅ 0地点スタート
-// ✅ 現在セッションのグラフ色：直近で増えた票で色分け（気になる=緑 / 普通=暗グレー / 気にならない=ピンク）
-// ✅ 直近の投票（何が押されたか）をグラフ上に表示
+// ✅ 現在セッション：直近投票（差分）で「直近の線分」だけ色分け（緑/暗グレー/ピンク）
+// ✅ 過去セッション：現在セッションと同じ仕組み（点に choice を保存して区間ごと色分け）
+// ✅ 連結グラフ：今まで通り（finalRate をセッション色でつなぐ）
 //
 // - 気になる: +1
 // - 普通: 0
@@ -80,12 +81,12 @@ const sessionChainCtx = sessionChainCanvas ? sessionChainCanvas.getContext("2d")
 let history = [];
 
 // prevSessions は「新しい順（0番が最新）」で保存される（unshift）
-// { resetNo, color, points:[{ts,rate}], finalRate, comments:[{ts,text,choice}] }
+// { resetNo, color, points:[{ts,rate,choice?}], finalRate, comments:[{ts,text,choice}] }
 let prevSessions = [];
 
 let resetCount = 0;
 
-// ★ 4つ目を黄色に（セッション色の名残：過去枠などで使用）
+// ★ 4つ目を黄色に（過去/連結のセッション色用）
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a", "#ffd600"];
 
 let animationStarted = false;
@@ -99,18 +100,18 @@ let basePointInserted = false;
 // ★ 直近投票判定用（前回の集計値）
 let lastCounts = null; // { pos, neu, neg, total }
 
-// ★ 直近の投票（表示用）
+// ★ 直近投票の表示用（任意）
 let lastActionChoice = null; // 'positive' | 'neutral' | 'negative' | null
 
-// ==== 色（現在セッショングラフ用） ====
+// ==== 色（直近投票の色：ユーザー指定と同じ） ====
 const CHOICE_COLORS = {
-  positive: "#22c55e", // 緑
-  neutral:  "#334155", // 暗めグレー
-  negative: "#ec4899", // ピンク
-  none:     "#94a3b8", // 未確定（グレー）
+  positive: "#22c55e", // 気になる＝緑
+  neutral:  "#334155", // 普通＝暗めグレー
+  negative: "#ec4899", // 気にならない＝ピンク
+  none:     "#94a3b8", // 未確定
 };
 
-// キャンバス（白ベース）
+// 白ベースのキャンバステーマ（見やすさ）
 const CANVAS_THEME = {
   bg: "#ffffff",
   axis: "#111827",
@@ -172,7 +173,6 @@ function normalizeChoice(choice) {
   if (choice === "understood") return "positive";
   if (choice === "not-understood") return "negative";
 
-  // コメントのみ等
   return "neutral";
 }
 
@@ -188,8 +188,6 @@ function normalizeComments(comments) {
 }
 
 // ✅ 平均スコア方式（0〜100%）
-// 平均スコア = (pos - neg) / totalVotes
-// 表示% = (avg + 1)/2 * 100
 function calcInterestRateAvg(pos, neu, neg) {
   const totalVotes = (Number(pos) || 0) + (Number(neu) || 0) + (Number(neg) || 0);
   if (totalVotes <= 0) return null;
@@ -218,9 +216,9 @@ function detectLastActionChoice(pos, neu, neg) {
   const dNeg = neg - lastCounts.neg;
 
   const inc = dPos + dNeu + dNeg;
-  if (inc <= 0) return null; // 増えてない（同一票数）→不明
+  if (inc <= 0) return null;
 
-  // 通常はどれかが +1 のはず。万一複数増える場合は最大増分を採用。
+  // 通常はどれかが +1。複数増なら最大増分を採用。
   let choice = null;
   let maxDelta = 0;
 
@@ -256,7 +254,7 @@ async function fetchResults() {
     const rate = calcInterestRateAvg(pos, neu, neg);
     rateUnderstood.textContent = rate === null ? "--%" : `${Math.round(rate)}%`;
 
-    // 想定人数は「進捗表示用」
+    // 想定人数（進捗）
     const maxP = Number(data.maxParticipants ?? 0);
     if (document.activeElement !== maxInput) maxInput.value = maxP;
 
@@ -275,14 +273,14 @@ async function fetchResults() {
     latestCurrentComments = normalizeComments(data.comments || []);
     renderCommentTimeline(latestCurrentComments);
 
-    // ✅ 直近投票の推定（差分）
+    // ✅ 直近投票を差分で推定
     const detected = detectLastActionChoice(pos, neu, neg);
     if (detected) lastActionChoice = detected;
 
-    // lastCounts 更新（次回の差分判定用）
+    // 次回の差分判定用に更新
     lastCounts = { pos, neu, neg, total };
 
-    // ✅ 0地点スタート：投票が始まる前に基準点を入れる（合計0票の間）
+    // ✅ 0地点スタート
     if (total === 0) {
       ensureBasePoint();
       lastActionChoice = null;
@@ -306,14 +304,15 @@ function addRatePoint(rate, choice) {
   if (rate === null) return;
 
   const last = history[history.length - 1];
-  // rate が同じでも「直近投票の色が変わった」なら点を入れたいので、choiceも見る
+
+  // rateが同じでも「直近票の種類」が変わったら点を追加して色変化させる
   if (last && last.rate === rate && (choice == null || last.choice === choice)) return;
 
   history.push({ ts: Date.now(), rate, choice: choice ?? null });
   if (history.length > 300) history = history.slice(-300);
 }
 
-// ==== 現在セッション描画 ====
+// ==== 現在セッション描画（直近票で区間色分け） ====
 function drawLineChart() {
   const w = canvas.width;
   const h = canvas.height;
@@ -322,14 +321,13 @@ function drawLineChart() {
   ctx.fillStyle = CANVAS_THEME.bg;
   ctx.fillRect(0, 0, w, h);
 
-  // ✅ 0地点スタート：まだ何も無いときは0点を作っておく（表示安定）
   if (history.length === 0) ensureBasePoint();
 
   const L = 70, R = 30, T = 44, B = 82;
   const plotW = w - L - R;
   const plotH = h - T - B;
 
-  // 枠（軸）
+  // 軸
   ctx.strokeStyle = CANVAS_THEME.axis;
   ctx.lineWidth = 3;
   ctx.setLineDash([]);
@@ -375,7 +373,7 @@ function drawLineChart() {
   });
   ctx.setLineDash([]);
 
-  // 線（区間ごとに色分け）
+  // 区間ごと色分け（p1.choice）
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
 
   for (let i = 1; i < history.length; i++) {
@@ -387,9 +385,7 @@ function drawLineChart() {
     const x1 = L + i * stepX;
     const y1 = valueToY(p1.rate, h, B, plotH);
 
-    // 「今増えた票」の色で区間を塗る（p1.choice 優先）
-    const segChoice = p1.choice ?? p0.choice ?? null;
-    ctx.strokeStyle = choiceToColor(segChoice);
+    ctx.strokeStyle = choiceToColor(p1.choice);
     ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.moveTo(x0, y0);
@@ -397,13 +393,12 @@ function drawLineChart() {
     ctx.stroke();
   }
 
-  // 点（見やすさ用）
+  // 点
   const r = 4;
   for (let i = 0; i < history.length; i++) {
     const p = history[i];
     const x = L + i * stepX;
     const y = valueToY(p.rate, h, B, plotH);
-    const dotChoice = p.choice ?? (i === history.length - 1 ? lastActionChoice : null);
 
     ctx.beginPath();
     ctx.arc(x, y, r + 2, 0, Math.PI * 2);
@@ -412,7 +407,7 @@ function drawLineChart() {
 
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = choiceToColor(dotChoice);
+    ctx.fillStyle = choiceToColor(p.choice);
     ctx.fill();
   }
 
@@ -421,30 +416,28 @@ function drawLineChart() {
   ctx.fillStyle = CANVAS_THEME.text;
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.fillText("現在セッション興味度推移（0%スタート / 平均スコア方式）", L, 10);
+  ctx.fillText("現在セッション興味度推移（直近票で色変化 / 0%スタート）", L, 10);
 
-  // 直近の投票（何が押されたか）表示
+  // 直近投票表示（任意：何が押されたか）
   const label = `直近の投票：${choiceToLabel(lastActionChoice)}`;
-  const labelColor = choiceToColor(lastActionChoice);
-
   ctx.font = "20px sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "top";
   ctx.fillStyle = CANVAS_THEME.subText;
   ctx.fillText(label, w - R, 12);
 
-  // 色チップ（右上）
+  // 色チップ
   const chipW = 14, chipH = 10;
-  ctx.fillStyle = labelColor;
-  ctx.fillRect(w - R - 14 - 8, 14 + 2, chipW, chipH);
+  ctx.fillStyle = choiceToColor(lastActionChoice);
+  ctx.fillRect(w - R - chipW - 8, 16, chipW, chipH);
   ctx.strokeStyle = CANVAS_THEME.gridStrong;
   ctx.lineWidth = 1;
-  ctx.strokeRect(w - R - 14 - 8, 14 + 2, chipW, chipH);
+  ctx.strokeRect(w - R - chipW - 8, 16, chipW, chipH);
 
   requestAnimationFrame(drawLineChart);
 }
 
-// ==== 過去セッション描画（グラフ） ====
+// ==== 過去セッション描画（現在セッションと同じ仕組み：区間ごと色分け） ====
 function drawPrevSessions() {
   const maxSlots = prevCanvases.length; // 4
   const sessionsForDisplay = prevSessions.slice(0, maxSlots); // 新しい→古い
@@ -467,23 +460,27 @@ function drawPrevSessions() {
 
     const shownResetNo = session?.resetNo ?? (resetCount - i > 0 ? (resetCount - i) : "—");
 
-    if (!session || !session.points || session.points.length === 0) {
+    if (!session || !Array.isArray(session.points) || session.points.length === 0) {
       if (note) note.textContent = `${shownResetNo}回目のリセットセッション：まだグラフはありません。`;
       if (rateLabel) rateLabel.textContent = "";
       continue;
     }
 
-    if (note) note.textContent = `${session.resetNo}回目のリセットセッション：興味度の推移（0〜100％）`;
+    if (note) note.textContent = `${session.resetNo}回目のリセットセッション：興味度の推移（直近票で色変化）`;
 
     if (rateLabel) {
       const lastRate = clamp100(Number(session.finalRate ?? 0));
       rateLabel.textContent = `（最終興味度：${Math.round(lastRate)}%）`;
     }
 
-    // 過去セッションも「0%開始点」を強制的に1点追加して描画
+    // 0%開始点を追加（choiceはnone扱い）
     const orig = session.points || [];
-    const hist = [{ ts: orig[0]?.ts ?? Date.now(), rate: 0 }, ...orig];
-    const color = session.color || "#4fc3f7";
+    const firstTs = orig[0]?.ts ?? Date.now();
+    const hist = [{ ts: firstTs, rate: 0, choice: null }, ...orig.map(p => ({
+      ts: safeTs(p?.ts),
+      rate: clamp100(Number(p?.rate ?? 0)),
+      choice: p?.choice ?? null, // ここが保存された直近票
+    }))];
 
     const L = 60, R = 30, T = 34, B = 52;
     const plotW = w - L - R;
@@ -519,23 +516,29 @@ function drawPrevSessions() {
       pctx.fillText(v + "%", L - 8, y);
     });
 
-    // 線
+    // 区間ごと色分け（p1.choice）
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
-    pctx.strokeStyle = color;
-    pctx.lineWidth = 3.5;
-    pctx.beginPath();
 
-    hist.forEach((p, idx) => {
-      const x = L + idx * stepX;
-      const y = valueToY(p.rate, h, B, plotH);
-      if (idx === 0) pctx.moveTo(x, y);
-      else pctx.lineTo(x, y);
-    });
-    pctx.stroke();
+    for (let k = 1; k < hist.length; k++) {
+      const p0 = hist[k - 1];
+      const p1 = hist[k];
+
+      const x0 = L + (k - 1) * stepX;
+      const y0 = valueToY(p0.rate, h, B, plotH);
+      const x1 = L + k * stepX;
+      const y1 = valueToY(p1.rate, h, B, plotH);
+
+      pctx.strokeStyle = choiceToColor(p1.choice);
+      pctx.lineWidth = 3.5;
+      pctx.beginPath();
+      pctx.moveTo(x0, y0);
+      pctx.lineTo(x1, y1);
+      pctx.stroke();
+    }
   }
 }
 
-// ==== 連結グラフ（最大4件） ====
+// ==== 連結グラフ（最大4件）※今まで通り（finalRateをセッション色でつなぐ） ====
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
@@ -623,6 +626,7 @@ function drawSessionChain() {
       return;
     }
 
+    // ✅ 連結は今まで通り「セッション色」
     sessionChainCtx.strokeStyle = pt.color;
     sessionChainCtx.lineWidth = 4;
     sessionChainCtx.beginPath();
@@ -702,7 +706,6 @@ function renderCommentTimeline(currentComments) {
     return;
   }
 
-  // 新しい順
   all.sort((a, b) => safeTs(b.ts) - safeTs(a.ts));
 
   all.forEach(c => {
@@ -826,15 +829,21 @@ if (btnReset) {
 
       if (history.length > 0) {
         const lastRate = clamp100(history[history.length - 1].rate);
-        const copy = history.map(p => ({ ts: p.ts, rate: p.rate }));
+
+        // ✅ 過去セッションに「choice」付きで保存（現在セッションと同じ仕組み）
+        const copy = history.map(p => ({
+          ts: safeTs(p.ts),
+          rate: clamp100(p.rate),
+          choice: p.choice ?? null,
+        }));
 
         const resetNo = resetCount + 1;
         const savedComments = normalizeComments(latestCurrentComments);
 
         prevSessions.unshift({
           resetNo,
-          color: currentColor,
-          points: copy,
+          color: currentColor,   // 連結グラフ用のセッション色（従来通り）
+          points: copy,          // ✅ choice も保存
           finalRate: lastRate,
           comments: savedComments,
         });
@@ -854,7 +863,7 @@ if (btnReset) {
       latestCurrentComments = [];
       basePointInserted = false;
 
-      // 直近投票判定をリセット（ここ重要）
+      // 差分判定をリセット
       lastCounts = null;
       lastActionChoice = null;
 
