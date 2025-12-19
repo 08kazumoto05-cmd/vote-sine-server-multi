@@ -1,12 +1,12 @@
 // vote.js（興味度アンケート用・API完全対応版）
-// ✅ 同一セッション内は「1回だけ投票」
-// ✅ ただし「ページ更新したら投票可能に戻す」(sessionStorageを使う)
-// ✅ さらに「管理者がリセットしたら投票可能に戻す」(server sessionId を監視)
+// ✅ 同一セッション内は「1回だけ投票」（= このページ表示中は1回のみ）
+// ✅ 「ページ更新したら投票可能に戻す」（= メモリ管理なのでリロードで解除）
+// ✅ 「管理者がリセットしたら投票可能に戻す」（= server sessionId を監視して解除）
 //
 // ・投票ボタン2つとも confirm で再確認
 // ・サーバーの /api/vote に { choice, comment } をPOSTする
 //
-// 注意：server.js 側は choice を understood/not-understood を受け付ける実装であること
+// 注意：server.js 側は /api/results で sessionId を返すこと
 
 document.addEventListener("DOMContentLoaded", () => {
   const btnUnderstood     = document.getElementById("btn-understood");       // 「興味がある」
@@ -18,14 +18,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const themeTitle        = document.getElementById("theme-title");
 
   // =============================
-  // セッション内1回投票 制御
+  // 重要：投票済みは「メモリだけ」で管理
+  // → リロードしたら必ず投票可能に戻る
   // =============================
-  // sessionStorageは「ページ更新で消える」ので、
-  // → 更新したら投票可になる（要件通り）
-  const SS_KEY_VOTED = "vote_once_voted";
-  const SS_KEY_SID   = "vote_once_session_id";
+  let votedInThisPage = false;
 
+  // sessionId は「管理者リセット検知」にだけ使う（これは保持してOK）
   let currentSessionId = null;
+  let lastSeenSessionId = null;
 
   function setMessage(text) {
     if (!message) return;
@@ -38,35 +38,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnNotUnderstood) btnNotUnderstood.disabled = dis;
   }
 
-  function markVoted() {
-    sessionStorage.setItem(SS_KEY_VOTED, "1");
-  }
-
-  function clearVoted() {
-    sessionStorage.removeItem(SS_KEY_VOTED);
-  }
-
-  function hasVoted() {
-    return sessionStorage.getItem(SS_KEY_VOTED) === "1";
-  }
-
-  function saveSessionId(sid) {
-    sessionStorage.setItem(SS_KEY_SID, String(sid));
-  }
-
-  function loadSessionId() {
-    const v = sessionStorage.getItem(SS_KEY_SID);
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-
   function applyVoteLockUI() {
-    if (hasVoted()) {
+    if (votedInThisPage) {
       setButtonsEnabled(false);
       setMessage("このセッションでは投票済みです。（ページ更新、または管理者のリセットで再投票できます）");
     } else {
       setButtonsEnabled(true);
-      // メッセージは上書きしない（自由入力のため）
+      // ここでメッセージを毎回消すとUXが悪いので、基本は触らない
     }
   }
 
@@ -85,20 +63,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // sessionId（管理者リセットで増える想定）
       const sid = Number(data.sessionId);
+
       if (Number.isFinite(sid) && sid >= 1) {
         currentSessionId = sid;
 
-        // 初回 or 管理者リセット検知
-        const prevSid = loadSessionId();
-        if (prevSid == null) {
-          // 初回：保存だけ
-          saveSessionId(sid);
-        } else if (prevSid !== sid) {
-          // ✅ 管理者がリセットした：投票状態を解除
-          clearVoted();
-          saveSessionId(sid);
-          setMessage("管理者がセッションをリセットしました。投票が再び可能です。");
+        if (lastSeenSessionId == null) {
+          // 初回
+          lastSeenSessionId = sid;
+        } else if (lastSeenSessionId !== sid) {
+          // ✅ 管理者がリセットした：投票可能に戻す
+          lastSeenSessionId = sid;
+          votedInThisPage = false;
           setButtonsEnabled(true);
+          setMessage("管理者がセッションをリセットしました。投票が再び可能です。");
         }
       }
 
@@ -119,8 +96,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // 投票送信（共通）
   // =============================
   async function postVote(choice, confirmText, successText) {
-    // 既に投票済みならブロック（念のため）
-    if (hasVoted()) {
+    // 既に投票済みならブロック
+    if (votedInThisPage) {
       applyVoteLockUI();
       return;
     }
@@ -129,10 +106,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!ok) return;
 
     try {
-      // 投票直前にもセッション同期（ズレ防止）
+      // 投票直前にも同期（リセット直後のズレ防止）
       await fetchThemeAndSession();
 
-      if (hasVoted()) {
+      if (votedInThisPage) {
         applyVoteLockUI();
         return;
       }
@@ -146,24 +123,23 @@ document.addEventListener("DOMContentLoaded", () => {
         })
       });
 
-      // サーバ側が「既に投票済み」を返す実装の場合も想定
       if (!res.ok) {
+        // サーバ側が already voted を返す場合にも対応
         let msg = "送信エラーが発生しました。";
         try {
           const j = await res.json();
           if (j?.error === "already voted") {
-            msg = "このセッションでは既に投票済みです。（ページ更新、または管理者のリセットで再投票できます）";
-            markVoted();
+            votedInThisPage = true;
             applyVoteLockUI();
-            setMessage(msg);
+            setMessage("このセッションでは既に投票済みです。（ページ更新、または管理者のリセットで再投票できます）");
             return;
           }
         } catch {}
         throw new Error(msg);
       }
 
-      // ✅ 成功したらこのページ表示中は投票不可
-      markVoted();
+      // ✅ 成功：このページ表示中は投票不可
+      votedInThisPage = true;
       applyVoteLockUI();
 
       setMessage(successText);
@@ -203,7 +179,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // =============================
   // コメントのみ送信
   // =============================
-  // 仕様：コメントだけは投票回数に含めない（＝投票ロックを掛けない）
+  // 仕様：コメント送信は投票ロックを掛けない
   if (btnSendComment && commentInput) {
     btnSendComment.addEventListener("click", async () => {
       const text = commentInput.value.trim();
@@ -213,15 +189,14 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       try {
-        // コメント送信前にセッション同期（リセット表示を反映）
         await fetchThemeAndSession();
 
         const res = await fetch("/api/vote", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            // サーバー側で choice 必須なのでダミー（投票にカウントしない実装が望ましい）
-            // ※あなたの server.js 側が commentOnly を判定できるならそれに合わせてください
+            // サーバ側でchoice必須ならダミー
+            // ※サーバで commentOnly を分けられるなら差し替えてOK
             choice: "understood",
             comment: text
           })
