@@ -1,10 +1,11 @@
 // ===============================
-// admin.js（安定版）
+// admin.js（安定版：過去セッション拡大を完全停止）
 // - ✅ ログインできない原因（null参照）を完全回避
-// - ✅ CanvasはCSSサイズ基準で描画（DPR対応/ぼやけ防止）
-// - ✅ 描画は「データ更新時のみ」→ 画面が徐々に大きくなる/重くなる原因を根本停止
+// - ✅ 現在セッション(sineCanvas)だけ CSSサイズ基準でDPR対応（ぼやけ防止）
+// - ✅ 過去セッション(prevChart1-4) / 連結(sessionChain) はHTML属性のwidth/height固定で描画（徐々に大きくならない）
+// - ✅ 描画は「データ更新時のみ」→ 徐々に大きくなる/重くなる原因を根本停止
 // - ✅ setInterval の多重起動を防止
-// - ✅ 過去セッションは最大4件（大きくならない）
+// - ✅ 過去セッションは最大4件
 // ===============================
 
 const ADMIN_PASSWORD = "cpa1968";
@@ -102,7 +103,7 @@ const CANVAS_THEME = {
 };
 
 // ===============================
-// Canvas: CSSサイズ基準 + DPR対応
+// Canvas: CSSサイズ基準（現在セッションのみ）+ DPR対応
 // ===============================
 function getCssPxSize(el) {
   if (!el) return { w: 0, h: 0 };
@@ -110,7 +111,8 @@ function getCssPxSize(el) {
   return { w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height)) };
 }
 
-function setupHiDPICanvas(el, context) {
+// ✅ DPR対応は「現在セッション(sineCanvas)だけ」
+function setupHiDPICanvasForCurrent(el, context) {
   if (!el || !context) return;
   const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
   const { w, h } = getCssPxSize(el);
@@ -122,19 +124,32 @@ function setupHiDPICanvas(el, context) {
   if (el.width !== targetW || el.height !== targetH) {
     el.width = targetW;
     el.height = targetH;
-    // CSS座標系で描けるように
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  } else {
+    // transformが壊れている場合の保険
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 }
 
-function setupAllCanvasesHiDPI() {
-  setupHiDPICanvas(canvas, ctx);
-  prevCanvases.forEach((c, i) => setupHiDPICanvas(c, prevCtxs[i]));
-  setupHiDPICanvas(sessionChainCanvas, sessionChainCtx);
+// ✅ 過去セッション/連結はHTML属性サイズを固定で使う（拡大させない）
+function getAttrSize(el) {
+  if (!el) return { w: 0, h: 0 };
+  const w = Math.max(1, Number(el.getAttribute("width")) || el.width || 0);
+  const h = Math.max(1, Number(el.getAttribute("height")) || el.height || 0);
+  return { w, h };
+}
+
+function setupAllCanvases() {
+  setupHiDPICanvasForCurrent(canvas, ctx);
+
+  // 過去セッション/連結は「絶対にwidth/heightを書き換えない」
+  // もしtransformが残ってたらリセット（ズレ防止）
+  prevCtxs.forEach(pctx => { if (pctx) pctx.setTransform(1, 0, 0, 1, 0, 0); });
+  if (sessionChainCtx) sessionChainCtx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 window.addEventListener("resize", () => {
-  setupAllCanvasesHiDPI();
+  setupAllCanvases();
   // resize時だけ再描画（無限ループなし）
   drawLineChart();
   drawPrevSessions();
@@ -156,10 +171,12 @@ function clamp100(x) {
   if (x > 100) return 100;
   return x;
 }
-function valueToY(value, canvasCssHeight, bottomPadding, plotHeight) {
+
+function valueToY(value, canvasHeight, bottomPadding, plotHeight) {
   const v = clamp100(value);
-  return canvasCssHeight - bottomPadding - (v / 100) * plotHeight;
+  return canvasHeight - bottomPadding - (v / 100) * plotHeight;
 }
+
 function safeTs(x) {
   const t = Number(x);
   return Number.isFinite(t) ? t : Date.now();
@@ -322,9 +339,9 @@ async function fetchResults() {
       addRatePoint(rate, detected);
     }
 
-    setupAllCanvasesHiDPI();
+    setupAllCanvases();
 
-    // ✅ ここが安定版の肝：データ更新時だけ1回描画
+    // ✅ データ更新時だけ1回描画
     requestAnimationFrame(() => {
       drawLineChart();
       drawPrevSessions();
@@ -455,7 +472,7 @@ function drawLineChart() {
 }
 
 // ===============================
-// 過去セッション描画
+// 過去セッション描画（HTML属性の固定サイズで描く）
 // ===============================
 function drawPrevSessions() {
   const maxSlots = prevCanvases.length;
@@ -470,8 +487,12 @@ function drawPrevSessions() {
 
     if (!c || !pctx) continue;
 
-    const { w, h } = getCssPxSize(c);
+    // ✅ CSSサイズではなく、HTML属性のwidth/heightで固定描画
+    const { w, h } = getAttrSize(c);
     if (!w || !h) continue;
+
+    // transformは常に等倍
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
 
     pctx.fillStyle = "#ffffff";
     pctx.fillRect(0, 0, w, h);
@@ -500,6 +521,7 @@ function drawPrevSessions() {
     const plotW = w - L - R;
     const plotH = h - T - B;
 
+    // 軸
     pctx.strokeStyle = "#111827";
     pctx.lineWidth = 2.5;
     pctx.setLineDash([]);
@@ -509,6 +531,7 @@ function drawPrevSessions() {
     pctx.lineTo(w - R, h - B);
     pctx.stroke();
 
+    // 横線
     const yTicks = [0, 25, 50, 75, 100];
     pctx.font = "16px sans-serif";
     pctx.textAlign = "right";
@@ -528,6 +551,7 @@ function drawPrevSessions() {
       pctx.fillText(v + "%", L - 8, y);
     });
 
+    // 線
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
     for (let k = 1; k < hist.length; k++) {
       const p0 = hist[k - 1];
@@ -547,13 +571,16 @@ function drawPrevSessions() {
 }
 
 // ===============================
-// 連結グラフ
+// 連結グラフ（HTML属性の固定サイズで描く）
 // ===============================
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
-  const { w, h } = getCssPxSize(sessionChainCanvas);
+  // ✅ CSSサイズではなく、HTML属性のwidth/heightで固定描画
+  const { w, h } = getAttrSize(sessionChainCanvas);
   if (!w || !h) return;
+
+  sessionChainCtx.setTransform(1, 0, 0, 1, 0, 0);
 
   sessionChainCtx.fillStyle = "#ffffff";
   sessionChainCtx.fillRect(0, 0, w, h);
@@ -584,6 +611,7 @@ function drawSessionChain() {
   const plotW = w - L - R;
   const plotH = h - T - B;
 
+  // 軸
   sessionChainCtx.strokeStyle = "#111827";
   sessionChainCtx.lineWidth = 3;
   sessionChainCtx.setLineDash([]);
@@ -593,6 +621,7 @@ function drawSessionChain() {
   sessionChainCtx.lineTo(w - R, h - B);
   sessionChainCtx.stroke();
 
+  // 横線
   const yTicks = [0, 25, 50, 75, 100];
   sessionChainCtx.font = "18px sans-serif";
   sessionChainCtx.textAlign = "right";
@@ -830,11 +859,11 @@ if (btnReset) {
           comments: savedComments,
         });
 
-        // ✅ 最大4件だけに固定（大きくならない）
+        // ✅ 最大4件
         if (prevSessions.length > 4) prevSessions = prevSessions.slice(0, 4);
       }
 
-      // 先に描画更新（体感を良くする）
+      // 先に描画更新
       drawPrevSessions();
       drawSessionChain();
       renderCommentTimeline([]);
@@ -930,7 +959,7 @@ function unlock() {
   if (lockScreen) lockScreen.style.display = "none";
   if (adminContent) adminContent.style.display = "block";
 
-  setupAllCanvasesHiDPI();
+  setupAllCanvases();
 
   // ✅ 多重起動防止
   if (pollingTimerId != null) {
