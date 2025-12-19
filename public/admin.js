@@ -1,12 +1,13 @@
 // ===============================
-// admin.js（興味率：カード/現在/過去/連結 + コメント保存＆色分け）
+// admin.js（興味率：カード/現在/過去/連結 + コメント保存＆色分け + スマホ高解像度）
 // ===============================
 //
 // ✅ 平均スコア方式（普通でもグラフが動く） + ✅ 0地点スタート
 // ✅ 現在セッション：直近投票（差分）で線分を色分け（緑/暗グレー/ピンク）
-// ✅ 過去セッション：1回目=青,2回目=赤,3回目=緑,4回目=黄 で保存（前の仕様に戻す）
+// ✅ 過去セッション：1回目=青,2回目=赤,3回目=緑,4回目=黄 で保存（前の仕様）
 // ✅ 連結グラフ：上記セッション色で線を引き、最終興味度の点＋%表示（前の仕様）
 // ✅ server.js の sessionId を監視して resetCount を同期（sessionId-1）
+// ✅ スマホでグラフが小さい/ぼける対策：CSSで高さを確保しつつ、JSでDPR対応で内部解像度を上げる
 //
 // ==== パスワード ====
 // 管理パスワード: cpa1968
@@ -117,6 +118,55 @@ const CANVAS_THEME = {
   subText: "#475569",
 };
 
+// =======================================
+// ✅ スマホで小さい/ぼける対策：Canvas DPR対応
+// - CSS側で height を指定しても、canvas内部解像度は増えない
+// - ここで devicePixelRatio に合わせて canvas.width/height を調整してくっきり描画
+// =======================================
+function getCssPxSize(el) {
+  if (!el) return { w: 0, h: 0 };
+  const rect = el.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width));
+  const h = Math.max(1, Math.floor(rect.height));
+  return { w, h };
+}
+
+function setupHiDPICanvas(el, context) {
+  if (!el || !context) return;
+
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1)); // 上限3（重くなりすぎ防止）
+  const { w, h } = getCssPxSize(el);
+
+  // CSS上のサイズが取れない時は何もしない（DOM未描画など）
+  if (!w || !h) return;
+
+  const targetW = Math.floor(w * dpr);
+  const targetH = Math.floor(h * dpr);
+
+  if (el.width !== targetW || el.height !== targetH) {
+    el.width = targetW;
+    el.height = targetH;
+
+    // 以後の描画を「CSS px基準」で書けるようにスケール
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+}
+
+// 管理画面の主要キャンバスをまとめてDPR調整
+function setupAllCanvasesHiDPI() {
+  setupHiDPICanvas(canvas, ctx);
+  prevCanvases.forEach((c, i) => setupHiDPICanvas(c, prevCtxs[i]));
+  setupHiDPICanvas(sessionChainCanvas, sessionChainCtx);
+}
+
+// リサイズ/回転で再調整
+window.addEventListener("resize", () => {
+  setupAllCanvasesHiDPI();
+  // サイズが変わると描画が崩れるので即再描画
+  drawPrevSessions();
+  drawSessionChain();
+});
+
 // ==== ユーティリティ ====
 function sessionNoToColor(sessionNo) {
   // sessionNo: 1,2,3,4,... を青赤緑黄に割り当て（4以降は繰り返し）
@@ -136,9 +186,9 @@ function clamp100(x) {
   return x;
 }
 
-function valueToY(value, canvasHeight, bottomPadding, plotHeight) {
+function valueToY(value, canvasCssHeight, bottomPadding, plotHeight) {
   const v = clamp100(value);
-  return canvasHeight - bottomPadding - (v / 100) * plotHeight;
+  return canvasCssHeight - bottomPadding - (v / 100) * plotHeight;
 }
 
 function safeTs(x) {
@@ -277,29 +327,31 @@ async function fetchResults() {
     const total = pos + neu + neg;
 
     // 表示
-    numUnderstood.textContent = String(pos);
-    numNotUnderstood.textContent = String(neg);
-    numTotal.textContent = String(total);
+    if (numUnderstood) numUnderstood.textContent = String(pos);
+    if (numNotUnderstood) numNotUnderstood.textContent = String(neg);
+    if (numTotal) numTotal.textContent = String(total);
     if (numNeutral) numNeutral.textContent = String(neu);
 
     // 興味度%（平均スコア方式）
     const rate = calcInterestRateAvg(pos, neu, neg);
-    rateUnderstood.textContent = rate === null ? "--%" : `${Math.round(rate)}%`;
+    if (rateUnderstood) rateUnderstood.textContent = rate === null ? "--%" : `${Math.round(rate)}%`;
 
     // 想定人数（進捗）
     const maxP = Number(data.maxParticipants ?? 0);
-    if (document.activeElement !== maxInput) maxInput.value = maxP;
+    if (maxInput && document.activeElement !== maxInput) maxInput.value = maxP;
 
-    if (Number(maxP) > 0) {
-      maxInfo.textContent = `想定人数：${maxP}人中、${total}人が投票済み`;
-    } else {
-      maxInfo.textContent = `想定人数が未設定です（先に人数を保存してください）`;
+    if (maxInfo) {
+      if (Number(maxP) > 0) {
+        maxInfo.textContent = `想定人数：${maxP}人中、${total}人が投票済み`;
+      } else {
+        maxInfo.textContent = `想定人数が未設定です（先に人数を保存してください）`;
+      }
     }
 
     // テーマ
     const theme = data.theme || "";
-    themeInfo.textContent = theme ? `現在のテーマ：${theme}` : "現在のテーマ：未設定";
-    if (document.activeElement !== themeInput) themeInput.value = theme;
+    if (themeInfo) themeInfo.textContent = theme ? `現在のテーマ：${theme}` : "現在のテーマ：未設定";
+    if (themeInput && document.activeElement !== themeInput) themeInput.value = theme;
 
     // コメント
     latestCurrentComments = normalizeComments(data.comments || []);
@@ -319,6 +371,9 @@ async function fetchResults() {
     } else {
       addRatePoint(rate, detected);
     }
+
+    // ✅ DPR調整（CSS高さに合わせて毎回追従）
+    setupAllCanvasesHiDPI();
 
     if (!animationStarted) {
       animationStarted = true;
@@ -346,8 +401,12 @@ function addRatePoint(rate, choice) {
 
 // ==== 現在セッション描画（直近票で区間色分け） ====
 function drawLineChart() {
-  const w = canvas.width;
-  const h = canvas.height;
+  // DPR対応後は「CSS px」で描画したいので、CSSサイズを使う
+  const { w, h } = getCssPxSize(canvas);
+  if (!w || !h) {
+    requestAnimationFrame(drawLineChart);
+    return;
+  }
 
   // 白ベース
   ctx.fillStyle = CANVAS_THEME.bg;
@@ -483,8 +542,8 @@ function drawPrevSessions() {
 
     if (!c || !pctx) continue;
 
-    const w = c.width;
-    const h = c.height;
+    const { w, h } = getCssPxSize(c);
+    if (!w || !h) continue;
 
     // 白ベース
     pctx.fillStyle = "#ffffff";
@@ -572,8 +631,8 @@ function drawPrevSessions() {
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
-  const w = sessionChainCanvas.width;
-  const h = sessionChainCanvas.height;
+  const { w, h } = getCssPxSize(sessionChainCanvas);
+  if (!w || !h) return;
 
   // 白ベース
   sessionChainCtx.fillStyle = "#ffffff";
@@ -591,6 +650,7 @@ function drawSessionChain() {
     sessionChainCtx.font = "28px sans-serif";
     sessionChainCtx.textAlign = "center";
     sessionChainCtx.textBaseline = "middle";
+    sessionChainCtxDocFix(sessionChainCtx, w, h);
     sessionChainCtx.fillText("まだセッションが保存されていません。", w / 2, h / 2);
     return;
   }
@@ -699,8 +759,12 @@ function drawSessionChain() {
   sessionChainCtx.fillText("セッション1→2→3→4 最終興味度 連結グラフ（0%スタート）", L, 22);
 }
 
+// Safariなどでフォント描画が崩れた時の保険（何もしないが呼び出し残し）
+function sessionChainDocFix() {}
+
 // ==== コメント表示（現在 + 過去保存分を統合） ====
 function renderCommentTimeline(currentComments) {
+  if (!commentList) return;
   commentList.innerHTML = "";
 
   const currentColor = getCurrentColor();
@@ -850,6 +914,8 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
+// ※ここは「前の仕様の色」維持のため、保存時colorは sessionNoToColor(endedSessionNo) を必ず使う
+// ※ server.js が /api/admin/reset のレスポンスで sessionId を返さない場合でも、/api/results 監視で同期される
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
     const ok = confirm("現在セッションの票・コメント・グラフをリセットします。\n本当に実行しますか？");
@@ -886,29 +952,18 @@ if (btnReset) {
         renderCommentTimeline([]);
       }
 
-      // サーバリセット（sessionId が進む）
+      // サーバリセット
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // server sessionId 同期（これで resetCount も正しく次へ進む）
-      let newSid = null;
-      try {
-        const j = await res.json();
-        newSid = Number(j?.sessionId);
-      } catch {}
-      if (Number.isFinite(newSid)) {
-        currentServerSessionId = newSid;
-        syncWithServerSessionId(newSid);
-      } else {
-        // もし sessionId が返らない場合でも最低限動く
-        resetCount++;
-        history = [];
-        latestCurrentComments = [];
-        basePointInserted = false;
-        lastCounts = null;
-        lastActionChoice = null;
-        ensureBasePoint();
-      }
+      // サーバがsessionIdを返さなくても、次のfetchResultsで同期されるのでOK
+      // ただしUXのためローカルも即初期化
+      history = [];
+      latestCurrentComments = [];
+      basePointInserted = false;
+      lastCounts = null;
+      lastActionChoice = null;
+      ensureBasePoint();
 
       await fetchResults();
       drawPrevSessions();
@@ -932,12 +987,6 @@ if (btnResetAll) {
       const res = await fetch("/api/admin/reset-all", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset all");
 
-      let sid = null;
-      try {
-        const j = await res.json();
-        sid = Number(j?.sessionId);
-      } catch {}
-
       history = [];
       prevSessions = [];
       latestCurrentComments = [];
@@ -946,18 +995,14 @@ if (btnResetAll) {
       lastCounts = null;
       lastActionChoice = null;
 
+      currentServerSessionId = null;
+      resetCount = 0;
+      ensureBasePoint();
+
+      setupAllCanvasesHiDPI();
       drawPrevSessions();
       drawSessionChain();
       renderCommentTimeline([]);
-
-      if (Number.isFinite(sid)) {
-        currentServerSessionId = sid;
-        syncWithServerSessionId(sid); // => resetCount = sid-1（通常 0）
-      } else {
-        currentServerSessionId = null;
-        resetCount = 0;
-        ensureBasePoint();
-      }
 
       await fetchResults();
 
@@ -970,20 +1015,25 @@ if (btnResetAll) {
 }
 
 // ==== ログイン ====
-btnUnlock.addEventListener("click", unlock);
-pwInput.addEventListener("keydown", e => {
-  if (e.key === "Enter") unlock();
-});
+if (btnUnlock) btnUnlock.addEventListener("click", unlock);
+if (pwInput) {
+  pwInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") unlock();
+  });
+}
 
 function unlock() {
-  const input = pwInput.value.trim();
+  const input = (pwInput?.value || "").trim();
   if (input !== ADMIN_PASSWORD) {
-    lockMsg.textContent = "パスワードが違います。";
+    if (lockMsg) lockMsg.textContent = "パスワードが違います。";
     return;
   }
 
-  lockScreen.style.display = "none";
-  adminContent.style.display = "block";
+  if (lockScreen) lockScreen.style.display = "none";
+  if (adminContent) adminContent.style.display = "block";
+
+  // ✅ まずDPR調整（表示直後にサイズが取れる）
+  setupAllCanvasesHiDPI();
 
   fetchResults();
   setInterval(fetchResults, 1000);
