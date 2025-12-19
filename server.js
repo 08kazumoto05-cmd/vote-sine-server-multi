@@ -2,11 +2,14 @@
 // 投票結果＋コメント＋履歴（興味度グラフ用）＋秘密キー付きURL制限
 // ★ 3択対応：interested / neutral / not-interested
 // ★ 管理画面互換のため /api/results は understood=interested, notUnderstood=not-interested を返す
-// ★ 重要：comments.ts は "数値(ms)" で返す（admin.js の safeTs が Number() 前提のため）
+// ★ 重要：comments.ts は "数値(ms)" で返す（admin.js の safeTs が Number() 前提）
+// ★ NEW：1セッションにつき投票は1回だけ（cookie voterId × sessionId でサーバ側拒否）
+// ★ NEW：/api/results に sessionId を返す（vote.js がセッション判定に使える）
 
 const express = require("express");
 const path = require("path");
 const bodyParser = require("body-parser");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +19,9 @@ const ACCESS_KEY = "class2025-secret";
 
 // ===== メモリ上のデータ =====
 const store = {
+  // セッションID（管理リセットごとに+1）
+  sessionId: 1,
+
   // 3択カウント
   interested: 0,     // 気になる（+1）
   neutral: 0,        // 普通（0）
@@ -36,10 +42,58 @@ let adminSettings = {
   maxParticipants: 0
 };
 
+// ===== 1セッション1票制：投票済み管理 =====
+// sessionId ごとに Set(voterId) を持つ
+const votedBySession = new Map(); // Map<string, Set<string>>
+
+function getVotedSet(sessionId) {
+  const key = String(sessionId);
+  if (!votedBySession.has(key)) votedBySession.set(key, new Set());
+  return votedBySession.get(key);
+}
+
 app.use(bodyParser.json());
 
 // 静的ファイル（/public 以下）
 app.use(express.static(path.join(__dirname, "public")));
+
+// ===== Cookie（voterId）ユーティリティ（外部ライブラリ不要） =====
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const out = {};
+  if (!header) return out;
+
+  header.split(";").forEach(part => {
+    const i = part.indexOf("=");
+    if (i < 0) return;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (!k) return;
+    out[k] = decodeURIComponent(v);
+  });
+  return out;
+}
+
+function newVoterId() {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+function ensureVoterId(req, res) {
+  const cookies = parseCookies(req);
+  let voterId = cookies.voterId;
+
+  // フォーマット軽くチェック（変なのは作り直す）
+  if (!voterId || typeof voterId !== "string" || voterId.length < 16) {
+    voterId = newVoterId();
+    // HttpOnly でOK（JSから読む必要なし）
+    // SameSite=Lax で同一サイト利用の通常範囲で送られる
+    res.setHeader("Set-Cookie", [
+      `voterId=${encodeURIComponent(voterId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 365}`
+    ]);
+  }
+
+  return voterId;
+}
 
 // ===== アクセスキー制御 =====
 
@@ -47,9 +101,7 @@ app.use(express.static(path.join(__dirname, "public")));
 function checkAccessKey(req, res, next) {
   const key = req.query.key;
   if (key !== ACCESS_KEY) {
-    return res
-      .status(403)
-      .send("アクセス権がありません（URLが正しくありません）。");
+    return res.status(403).send("アクセス権がありません（URLが正しくありません）。");
   }
   next();
 }
@@ -59,8 +111,9 @@ app.get("/", (req, res) => {
   res.redirect(`/vote.html?key=${ACCESS_KEY}`);
 });
 
-// 投票画面（key 必須）
+// 投票画面（key 必須）＋ voterId cookie を必ず発行
 app.get("/vote.html", checkAccessKey, (req, res) => {
+  ensureVoterId(req, res);
   res.sendFile(path.join(__dirname, "public", "vote.html"));
 });
 
@@ -87,18 +140,43 @@ function nowMs() {
 // ===== API =====
 
 // 投票 API（3択）
-// ※ choice が無い場合は「コメントのみ」として扱えるようにしておく（堅牢化）
+// ✅ 1セッション1票：同一 voterId は同一 sessionId で投票不可
+// ※ choice が無い場合は「コメントのみ」として扱える（堅牢化）
+// ※ コメントのみ送信（isCommentOnly=true）も投票扱いしない
 app.post("/api/vote", (req, res) => {
   try {
-    const { choice, comment } = req.body || {};
+    const { choice, comment, sessionId: clientSessionId, isCommentOnly } = req.body || {};
     const ts = nowMs();
 
-    // choice がある場合のみ投票としてカウント
-    if (choice != null) {
+    // voterId を確保（API直叩きでも発行される）
+    const voterId = ensureVoterId(req, res);
+
+    // サーバのセッションIDを正とする（クライアント値は参考程度）
+    const sessionId = store.sessionId;
+
+    // コメントのみ扱いなら投票判定をスキップ
+    const commentOnly = Boolean(isCommentOnly) || choice == null;
+
+    // ---- 投票（choiceあり＆コメントのみでない） ----
+    if (!commentOnly) {
       if (!VALID_CHOICES.includes(choice)) {
         return res.status(400).json({ success: false, error: "invalid choice" });
       }
 
+      // ✅ 1セッション1票チェック
+      const set = getVotedSet(sessionId);
+      if (set.has(voterId)) {
+        return res.status(409).json({
+          success: false,
+          error: "already voted in this session",
+          sessionId
+        });
+      }
+
+      // 投票登録（先に mark して二重送信も防ぐ）
+      set.add(voterId);
+
+      // カウント
       if (choice === "interested") store.interested += 1;
       else if (choice === "neutral") store.neutral += 1;
       else if (choice === "not-interested") store.notInterested += 1;
@@ -112,16 +190,19 @@ app.post("/api/vote", (req, res) => {
       });
     }
 
-    // コメント保存（任意）
+    // ---- コメント保存（任意） ----
     if (comment && typeof comment === "string" && comment.trim().length > 0) {
+      // choice はコメントにも紐づけたいので、投票時はそのchoice、コメントのみ時は null でもOK
+      const savedChoice = commentOnly ? (VALID_CHOICES.includes(choice) ? choice : null) : choice;
+
       store.comments.push({
-        choice: choice ?? null,
+        choice: savedChoice ?? null,
         text: comment.trim(),
         ts
       });
     }
 
-    res.json({ success: true });
+    res.json({ success: true, sessionId });
   } catch (e) {
     console.error(e);
     res.status(500).json({ success: false, error: "internal error" });
@@ -167,6 +248,8 @@ app.post("/api/admin/max-participants", (req, res) => {
 });
 
 // 管理者用：投票データをリセット（現在セッションのみ）
+// ✅ sessionId を +1 して「新セッション開始」
+// ✅ 投票済みセットも新セッションに切り替わる
 app.post("/api/admin/reset", (req, res) => {
   store.interested = 0;
   store.neutral = 0;
@@ -175,7 +258,10 @@ app.post("/api/admin/reset", (req, res) => {
   store.comments = [];
   store.history = [];
 
-  res.json({ success: true });
+  // NEW: セッションを進める
+  store.sessionId += 1;
+
+  res.json({ success: true, sessionId: store.sessionId });
 });
 
 // 管理者用：全投票データを完全リセット
@@ -190,10 +276,16 @@ app.post("/api/admin/reset-all", (req, res) => {
 
   adminSettings.maxParticipants = 0;
 
-  res.json({ success: true });
+  // NEW: セッションを初期化（好みで 1 に戻す）
+  store.sessionId = 1;
+
+  // NEW: 投票済み記録も全削除
+  votedBySession.clear();
+
+  res.json({ success: true, sessionId: store.sessionId });
 });
 
-// 結果取得 API（管理画面用）
+// 結果取得 API（管理画面用 / 投票側も参照）
 app.get("/api/results", (req, res) => {
   const total = store.interested + store.neutral + store.notInterested;
 
@@ -203,18 +295,13 @@ app.get("/api/results", (req, res) => {
   const neutral = store.neutral;              // 0側
 
   // ★ admin.js が扱いやすい形に整形して返す
-  //  - ts は数値(ms)
-  //  - choice は understood / not-understood / neutral / null
   const comments = store.comments.slice(-200).map(c => ({
     choice: toAdminChoice(c.choice),
-    // 互換：admin.js は text を見ているので text を必ず入れる
     text: String(c.text ?? ""),
     ts: Number.isFinite(Number(c.ts)) ? Number(c.ts) : nowMs(),
-    // デバッグ用に元 choice も返しておく（不要なら消してOK）
     rawChoice: c.choice ?? null
   }));
 
-  // history も数値 ts を保証
   const history = store.history.slice(-400).map(h => ({
     ts: Number.isFinite(Number(h.ts)) ? Number(h.ts) : nowMs(),
     interested: h.interested ?? 0,
@@ -236,7 +323,10 @@ app.get("/api/results", (req, res) => {
     history,
 
     maxParticipants: adminSettings.maxParticipants,
-    theme: store.theme
+    theme: store.theme,
+
+    // NEW: vote.js が「セッションごとに1回」を判断するために返す
+    sessionId: store.sessionId
   });
 });
 
