@@ -1,17 +1,16 @@
+
 /* =========================
    共通（投票者画面：白ベース）
    ========================= */
 * {
   box-sizing: border-box;
 }
-
 body {
   margin: 0;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #f5f5f5;
   color: #333;
 }
-
 .container {
   max-width: 900px;
   margin: 24px auto;
@@ -20,22 +19,18 @@ body {
   border-radius: 12px;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.06);
 }
-
 h1 {
   margin-top: 0;
   text-align: center;
 }
-
 .desc {
   font-size: 0.95rem;
   color: #555;
 }
-
 .vote-box {
   margin: 24px 0;
   text-align: center;
 }
-
 .btn {
   padding: 12px 20px;
   margin: 8px;
@@ -45,47 +40,39 @@ h1 {
   cursor: pointer;
   transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.1s ease;
 }
-
 .btn:active {
   transform: scale(0.97);
   box-shadow: none;
 }
-
 .btn.understood {
   background: #1976d2;
   color: #fff;
   box-shadow: 0 3px 6px rgba(25, 118, 210, 0.4);
 }
-
 .btn.not-understood {
   background: #e53935;
   color: #fff;
   box-shadow: 0 3px 6px rgba(229, 57, 53, 0.4);
 }
-
 .btn.reset {
   background: #757575;
   color: #fff;
   box-shadow: 0 3px 6px rgba(117, 117, 117, 0.4);
 }
-
 .message {
   margin-top: 8px;
   min-height: 1.5em;
   font-size: 0.95rem;
   color: #1976d2;
 }
-
 .small-note {
   margin-top: 8px;
   font-size: 0.85rem;
   color: #777;
 }
-
 .result-box {
   margin-top: 24px;
 }
-
 .numbers {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -93,7 +80,6 @@ h1 {
   margin-bottom: 16px;
   font-size: 0.95rem;
 }
-
 canvas {
   border-radius: 8px;
   background: #fafafa;
@@ -102,12 +88,10 @@ canvas {
   width: 100%;
   height: auto;
 }
-
 .legend {
   margin-top: 8px;
   font-size: 0.9rem;
 }
-
 .legend-box {
   display: inline-block;
   width: 16px;
@@ -116,21 +100,17 @@ canvas {
   vertical-align: middle;
   border-radius: 2px;
 }
-
 .legend-box.understood {
   background: #1976d2;
 }
-
 .reset-box {
   margin-top: 16px;
   text-align: right;
 }
-
 /* 管理画面ロック（旧ID系：残しておく） */
 #lock-screen {
   margin-top: 16px;
 }
-
 #lock-screen input {
   padding: 8px;
   font-size: 1rem;
@@ -138,12 +118,10 @@ canvas {
   border: 1px solid #ccc;
   margin-right: 8px;
 }
-
 /* コメント入力欄 */
 .comment-input-box {
   margin-top: 24px;
 }
-
 .comment-input-box textarea {
   width: 100%;
   padding: 8px;
@@ -152,21 +130,18 @@ canvas {
   border: 1px solid #ccc;
   resize: vertical;
 }
-
 /* コメント表示欄（投票/簡易管理 共通） */
 .comment-box {
   margin-top: 32px;
   padding-top: 16px;
   border-top: 1px solid #eee;
 }
-
 .comment-list {
   margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-
 .comment-item {
   padding: 8px 10px;
   border-radius: 8px;
@@ -174,14 +149,12 @@ canvas {
   border: 1px solid #e0e0e0;
   font-size: 0.9rem;
 }
-
 .note-anon {
   font-size: 0.9rem;
   color: #555;
   margin-top: 8px;
   margin-bottom: 8px;
 }
-
 .comment-meta {
   display: flex;
   justify-content: space-between;
@@ -189,19 +162,15 @@ canvas {
   font-size: 0.8rem;
   color: #777;
 }
-
 .comment-tag {
   font-weight: bold;
 }
-
 .comment-tag.understood {
   color: #1976d2;
 }
-
 .comment-tag.not-understood {
   color: #e53935;
 }
-
 @media (max-width: 600px) {
   .numbers {
     grid-template-columns: 1fr;
@@ -210,20 +179,17 @@ canvas {
     text-align: center;
   }
 }
-
 /* =========================
    管理画面（admin-*）：白ベース＆黒文字
    ※ここから下が管理画面専用
    ========================= */
-
 .admin-body {
   margin: 0;
   min-height: 100vh;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f7f7fb;
-  color: #111827;
+  background: #f7f7fb;          /* 明るい背景 */
+  color: #111827;               /* 黒寄り文字 */
 }
-
 /* ロック画面 */
 .admin-lock-screen {
   position: fixed;
@@ -234,7 +200,6 @@ canvas {
   background: rgba(245, 246, 250, 0.96);
   z-index: 50;
 }
-
 .admin-lock-panel {
   width: 360px;
   max-width: 90vw;
@@ -246,7 +211,6 @@ canvas {
   backdrop-filter: blur(8px);
   text-align: center;
 }
-
 .logo {
   margin: 0 0 8px;
   font-size: 22px;
@@ -255,19 +219,16 @@ canvas {
   -webkit-background-clip: text;
   color: transparent;
 }
-
 .lock-desc {
   margin: 0 0 16px;
   font-size: 13px;
   color: #4b5563;
 }
-
 .lock-message {
   margin-top: 10px;
   font-size: 13px;
   color: #b91c1c;
 }
-
 /* 管理画面入力 */
 .admin-body .input-text {
   width: 100%;
@@ -280,17 +241,14 @@ canvas {
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
-
 .admin-body .input-text::placeholder {
   color: #9ca3af;
 }
-
 .admin-body .input-text:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
   background: #ffffff;
 }
-
 /* 管理画面ボタン（投票画面の .btn と共存） */
 .admin-body .btn {
   border: none;
@@ -306,7 +264,6 @@ canvas {
   justify-content: center;
   gap: 6px;
 }
-
 .admin-body .btn.primary {
   margin-top: 14px;
   width: 100%;
@@ -314,37 +271,30 @@ canvas {
   color: white;
   box-shadow: 0 12px 28px rgba(37,99,235,0.25);
 }
-
 .admin-body .btn.primary:hover {
   transform: translateY(-1px);
   box-shadow: 0 16px 36px rgba(37,99,235,0.30);
 }
-
 .admin-body .btn.ghost {
   background: #ffffff;
   color: #111827;
   border: 1px solid #d1d5db;
 }
-
 .admin-body .btn.ghost:hover {
   background: #f3f4f6;
 }
-
 .admin-body .btn.danger {
   background: linear-gradient(135deg, #f97316, #ef4444);
   color: #fff;
   box-shadow: 0 12px 28px rgba(239,68,68,0.22);
 }
-
 .admin-body .btn.danger:hover {
   transform: translateY(-1px);
   box-shadow: 0 16px 36px rgba(239,68,68,0.26);
 }
-
 .admin-body .btn.wide {
   width: 100%;
 }
-
 /* 管理画面シェル */
 .admin-shell {
   position: relative;
@@ -352,7 +302,6 @@ canvas {
   padding: 20px clamp(16px, 3vw, 36px) 32px;
   box-sizing: border-box;
 }
-
 .admin-bg-glow {
   position: fixed;
   inset: 0;
@@ -363,7 +312,6 @@ canvas {
   pointer-events: none;
   z-index: -1;
 }
-
 .admin-header {
   display: flex;
   justify-content: space-between;
@@ -371,20 +319,17 @@ canvas {
   gap: 16px;
   margin-bottom: 24px;
 }
-
 .admin-title {
   margin: 0;
   font-size: 22px;
   letter-spacing: 0.02em;
   color: #111827;
 }
-
 .admin-subtitle {
   margin: 6px 0 0;
   font-size: 13px;
   color: #4b5563;
 }
-
 .time-indicator {
   font-size: 12px;
   padding: 4px 10px;
@@ -393,14 +338,12 @@ canvas {
   border: 1px solid #e5e7eb;
   color: #111827;
 }
-
-/* レイアウト（PCは固定でこのまま） */
+/* レイアウト */
 .admin-main {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 18px;
 }
-
 /* カード */
 .card {
   position: relative;
@@ -412,66 +355,54 @@ canvas {
   margin-bottom: 14px;
   color: #111827;
 }
-
 .card.large {
   padding: 16px 18px 10px;
 }
-
 .card.neon {
   border-color: rgba(37,99,235,0.40);
   box-shadow: 0 14px 35px rgba(37,99,235,0.10);
 }
-
 .card.danger {
   border-color: rgba(239,68,68,0.45);
 }
-
 .card-title {
   margin: 0 0 6px;
   font-size: 15px;
   color: #111827;
 }
-
 .card-caption {
   margin: 0 0 10px;
   font-size: 12px;
   color: #6b7280;
 }
-
 .card-header-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 12px;
 }
-
 /* 左カラム */
 .admin-panel .card:not(:last-child) {
   margin-bottom: 14px;
 }
-
 .field-row {
   display: flex;
   gap: 8px;
   align-items: center;
   margin-top: 6px;
 }
-
 .flex-1 {
   flex: 1;
 }
-
 .admin-body .input-text.small {
   width: 110px;
 }
-
 /* 右カラム */
 .admin-dashboard {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
-
 /* サマリーカード */
 .summary-grid {
   display: grid;
@@ -479,7 +410,6 @@ canvas {
   gap: 10px;
   margin-bottom: 4px;
 }
-
 .summary-card,
 .summary-card.accent {
   padding: 10px 12px;
@@ -490,32 +420,27 @@ canvas {
   grid-template-rows: auto 1fr auto;
   color: #111827;
 }
-
 .summary-card .label {
   font-size: 11px;
   color: #6b7280;
 }
-
 .summary-card .value {
   font-size: 22px;
   font-weight: 700;
   margin-top: 2px;
   color: #111827;
 }
-
 .summary-card .unit {
   font-size: 11px;
   justify-self: flex-end;
   color: #6b7280;
 }
-
 /* コメント（管理画面） */
 .admin-body .comment-list {
   max-height: 260px;
   overflow-y: auto;
   padding-right: 4px;
 }
-
 .admin-body .comment-item {
   padding: 8px 10px;
   border-radius: 10px;
@@ -524,23 +449,19 @@ canvas {
   margin-bottom: 8px;
   color: #111827;
 }
-
 .admin-body .comment-meta {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 4px;
 }
-
 .admin-body .comment-meta span:last-child {
   font-size: 11px;
   color: #6b7280;
 }
-
 .admin-body .comment-item > div:last-child {
   font-size: 13px;
 }
-
 /* タグ（管理画面用：淡色＋黒寄り） */
 .admin-body .comment-tag {
   font-size: 11px;
@@ -548,18 +469,16 @@ canvas {
   border-radius: 999px;
   font-weight: 700;
 }
-
 .admin-body .comment-tag.understood {
   background: rgba(16,185,129,0.14);
   color: #065f46;
 }
-
 .admin-body .comment-tag.not-understood {
   background: rgba(239,68,68,0.14);
   color: #7f1d1d;
 }
-
-/* キャンバス（管理画面：枠だけ白系） */
+/* キャンバス（管理画面：枠だけ白系）
+   ※JSで黒塗りしている場合は、JS側も白に変えてください */
 .admin-body canvas {
   display: block;
   width: 100%;
@@ -567,63 +486,10 @@ canvas {
   background: #ffffff;
   border: 1px solid #e5e7eb;
 }
-
-/* =========================
-   レスポンシブ（PCは維持、スマホだけ拡大）
-   ========================= */
-
-/* 900px以下：既存通り 1カラム化 */
+/* レスポンシブ */
 @media (max-width: 900px) {
   .admin-main {
     grid-template-columns: 1fr;
   }
 }
 
-/* ✅ 768px以下：グラフを「見た目」で大きくする（CSSのみ） */
-@media (max-width: 768px) {
-  /* 余白を少し詰めて横幅を確保 */
-  .admin-shell {
-    padding: 14px 12px 24px;
-  }
-
-  .card {
-    padding: 14px 14px 16px;
-    border-radius: 16px;
-  }
-
-  /* 現在セッション（メイン）を大きく */
-  #sineCanvas {
-    width: 100% !important;
-    height: 380px !important; /* 好みで 420px とかに上げてOK */
-  }
-
-  /* 連結グラフも大きく */
-  #sessionChain {
-    width: 100% !important;
-    height: 300px !important;
-  }
-
-  /* 過去4枠も「縦に並べて」大きく */
-  #prevChart1, #prevChart2, #prevChart3, #prevChart4 {
-    width: 100% !important;
-    height: 240px !important;
-  }
-
-  /* canvas全般：スマホ時は高さ優先（autoだと小さくなりがちなので） */
-  .admin-body canvas {
-    height: auto;
-  }
-
-  /* コメント欄もスマホで見やすく */
-  .admin-body .comment-list {
-    max-height: 360px;
-  }
-
-  /* タイトル周り少し調整 */
-  .admin-title {
-    font-size: 20px;
-  }
-  .admin-subtitle {
-    font-size: 12px;
-  }
-}
