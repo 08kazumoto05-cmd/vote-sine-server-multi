@@ -1,11 +1,12 @@
 // ===============================
-// admin.js（興味率：カード/現在/過去/連結 + コメント保存＆色分け）
+// admin.js（安定版）
 // - ✅ ログインできない原因（null参照）を完全回避
-// - ✅ CanvasはCSSサイズ基準で描画（ぼやけ防止）
-// - ✅ 過去セッションcanvasは「拡大しない」
+// - ✅ CanvasはCSSサイズ基準で描画（DPR対応/ぼやけ防止）
+// - ✅ 描画は「データ更新時のみ」→ 画面が徐々に大きくなる/重くなる原因を根本停止
+// - ✅ setInterval の多重起動を防止
+// - ✅ 過去セッションは最大4件（大きくならない）
 // ===============================
 
-// ==== パスワード ====
 const ADMIN_PASSWORD = "cpa1968";
 
 // ===============================
@@ -72,15 +73,17 @@ let history = [];        // [{ ts, rate, choice }]
 let prevSessions = [];   // [{ resetNo, color, points, finalRate, comments }]
 let resetCount = 0;
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a", "#ffd600"];
-let animationStarted = false;
 
 let latestCurrentComments = [];
 let basePointInserted = false;
 
-let lastCounts = null;       // { pos, neu, neg, total }
-let lastActionChoice = null; // 'positive' | 'neutral' | 'negative' | null
+let lastCounts = null;        // { pos, neu, neg, total }
+let lastActionChoice = null;  // 'positive' | 'neutral' | 'negative' | null
 
 let currentServerSessionId = null;
+
+// ✅ setInterval 多重起動防止
+let pollingTimerId = null;
 
 const CHOICE_COLORS = {
   positive: "#22c55e",
@@ -99,7 +102,7 @@ const CANVAS_THEME = {
 };
 
 // ===============================
-// Canvas: CSSサイズ基準 + DPR対応（拡大はしない）
+// Canvas: CSSサイズ基準 + DPR対応
 // ===============================
 function getCssPxSize(el) {
   if (!el) return { w: 0, h: 0 };
@@ -119,6 +122,7 @@ function setupHiDPICanvas(el, context) {
   if (el.width !== targetW || el.height !== targetH) {
     el.width = targetW;
     el.height = targetH;
+    // CSS座標系で描けるように
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 }
@@ -131,6 +135,8 @@ function setupAllCanvasesHiDPI() {
 
 window.addEventListener("resize", () => {
   setupAllCanvasesHiDPI();
+  // resize時だけ再描画（無限ループなし）
+  drawLineChart();
   drawPrevSessions();
   drawSessionChain();
 });
@@ -150,12 +156,10 @@ function clamp100(x) {
   if (x > 100) return 100;
   return x;
 }
-
 function valueToY(value, canvasCssHeight, bottomPadding, plotHeight) {
   const v = clamp100(value);
   return canvasCssHeight - bottomPadding - (v / 100) * plotHeight;
 }
-
 function safeTs(x) {
   const t = Number(x);
   return Number.isFinite(t) ? t : Date.now();
@@ -167,7 +171,6 @@ function choiceToLabel(choice) {
   if (choice === "negative") return "気にならない";
   return "—";
 }
-
 function choiceToColor(choice) {
   if (choice === "positive") return CHOICE_COLORS.positive;
   if (choice === "neutral") return CHOICE_COLORS.neutral;
@@ -204,8 +207,8 @@ function calcInterestRateAvg(pos, neu, neg) {
   const totalVotes = (Number(pos) || 0) + (Number(neu) || 0) + (Number(neg) || 0);
   if (totalVotes <= 0) return null;
   const scoreSum = (Number(pos) || 0) - (Number(neg) || 0);
-  const avg = scoreSum / totalVotes;   // -1..+1
-  const pct = (avg + 1) / 2;           // 0..1
+  const avg = scoreSum / totalVotes; // -1..+1
+  const pct = (avg + 1) / 2;         // 0..1
   return clamp100(pct * 100);
 }
 
@@ -249,7 +252,19 @@ function syncWithServerSessionId(newSid) {
 }
 
 // ===============================
-// 結果取得
+// 履歴管理
+// ===============================
+function addRatePoint(rate, choice) {
+  if (rate === null) return;
+  const last = history[history.length - 1];
+  if (last && last.rate === rate && (choice == null || last.choice === choice)) return;
+
+  history.push({ ts: Date.now(), rate, choice: choice ?? null });
+  if (history.length > 300) history = history.slice(-300);
+}
+
+// ===============================
+// 結果取得（成功したら「1回だけ」描画）
 // ===============================
 async function fetchResults() {
   try {
@@ -257,7 +272,7 @@ async function fetchResults() {
     if (!res.ok) throw new Error("failed to fetch results");
     const data = await res.json();
 
-    // sessionId 同期（別端末のリセットでも色順ズレを防ぐ）
+    // sessionId 同期
     const sid = Number(data.sessionId);
     if (Number.isFinite(sid)) {
       if (currentServerSessionId == null) {
@@ -298,7 +313,6 @@ async function fetchResults() {
 
     const detected = detectLastActionChoice(pos, neu, neg);
     if (detected) lastActionChoice = detected;
-
     lastCounts = { pos, neu, neg, total };
 
     if (total === 0) {
@@ -310,10 +324,12 @@ async function fetchResults() {
 
     setupAllCanvasesHiDPI();
 
-    if (!animationStarted && ctx && canvas) {
-      animationStarted = true;
-      requestAnimationFrame(drawLineChart);
-    }
+    // ✅ ここが安定版の肝：データ更新時だけ1回描画
+    requestAnimationFrame(() => {
+      drawLineChart();
+      drawPrevSessions();
+      drawSessionChain();
+    });
 
     updateTimeLabel();
   } catch (e) {
@@ -322,28 +338,13 @@ async function fetchResults() {
 }
 
 // ===============================
-// 履歴管理
-// ===============================
-function addRatePoint(rate, choice) {
-  if (rate === null) return;
-  const last = history[history.length - 1];
-  if (last && last.rate === rate && (choice == null || last.choice === choice)) return;
-
-  history.push({ ts: Date.now(), rate, choice: choice ?? null });
-  if (history.length > 300) history = history.slice(-300);
-}
-
-// ===============================
-// 現在セッション描画
+// 現在セッション描画（無限ループなし）
 // ===============================
 function drawLineChart() {
   if (!canvas || !ctx) return;
 
   const { w, h } = getCssPxSize(canvas);
-  if (!w || !h) {
-    requestAnimationFrame(drawLineChart);
-    return;
-  }
+  if (!w || !h) return;
 
   ctx.fillStyle = CANVAS_THEME.bg;
   ctx.fillRect(0, 0, w, h);
@@ -354,6 +355,7 @@ function drawLineChart() {
   const plotW = w - L - R;
   const plotH = h - T - B;
 
+  // 軸
   ctx.strokeStyle = CANVAS_THEME.axis;
   ctx.lineWidth = 3;
   ctx.setLineDash([]);
@@ -363,6 +365,7 @@ function drawLineChart() {
   ctx.lineTo(w - R, h - B);
   ctx.stroke();
 
+  // 横線
   const yTicks = [0, 25, 50, 75, 100];
   ctx.font = "22px sans-serif";
   ctx.textAlign = "right";
@@ -382,6 +385,7 @@ function drawLineChart() {
     ctx.fillText(v + "%", L - 10, y);
   });
 
+  // 縦点線
   ctx.strokeStyle = CANVAS_THEME.grid;
   ctx.lineWidth = 1.5;
   ctx.setLineDash([8, 8]);
@@ -394,8 +398,8 @@ function drawLineChart() {
   });
   ctx.setLineDash([]);
 
+  // 線（区間色）
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
-
   for (let i = 1; i < history.length; i++) {
     const p0 = history[i - 1];
     const p1 = history[i];
@@ -411,6 +415,7 @@ function drawLineChart() {
     ctx.stroke();
   }
 
+  // 点
   const r = 4;
   for (let i = 0; i < history.length; i++) {
     const p = history[i];
@@ -426,12 +431,14 @@ function drawLineChart() {
     ctx.fill();
   }
 
+  // タイトル
   ctx.font = "24px sans-serif";
   ctx.fillStyle = CANVAS_THEME.text;
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.fillText("現在セッション興味度推移（直近票で色変化 / 0%スタート）", L, 10);
 
+  // 直近投票
   const label = `直近の投票：${choiceToLabel(lastActionChoice)}`;
   ctx.font = "20px sans-serif";
   ctx.textAlign = "right";
@@ -445,8 +452,6 @@ function drawLineChart() {
   ctx.strokeStyle = CANVAS_THEME.gridStrong;
   ctx.lineWidth = 1;
   ctx.strokeRect(w - R - chipW - 8, 16, chipW, chipH);
-
-  requestAnimationFrame(drawLineChart);
 }
 
 // ===============================
@@ -807,8 +812,8 @@ if (btnReset) {
     try {
       const endedSessionNo = resetCount + 1;
 
-      // 過去セッション保存
-      if (history.length > 1) { // 0%だけの状態は保存しない
+      // 過去セッション保存（0%だけの状態は保存しない）
+      if (history.length > 1) {
         const lastRate = clamp100(history[history.length - 1].rate);
         const copy = history.map(p => ({
           ts: safeTs(p.ts),
@@ -824,13 +829,17 @@ if (btnReset) {
           finalRate: lastRate,
           comments: savedComments,
         });
+
+        // ✅ 最大4件だけに固定（大きくならない）
         if (prevSessions.length > 4) prevSessions = prevSessions.slice(0, 4);
       }
 
+      // 先に描画更新（体感を良くする）
       drawPrevSessions();
       drawSessionChain();
       renderCommentTimeline([]);
 
+      // サーバリセット
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed");
 
@@ -851,8 +860,6 @@ if (btnReset) {
       }
 
       await fetchResults();
-      drawPrevSessions();
-      drawSessionChain();
       alert("投票データをリセットしました。");
     } catch (e) {
       console.error(e);
@@ -880,9 +887,10 @@ if (btnResetAll) {
       lastCounts = null;
       lastActionChoice = null;
 
+      renderCommentTimeline([]);
       drawPrevSessions();
       drawSessionChain();
-      renderCommentTimeline([]);
+      drawLineChart();
 
       if (Number.isFinite(sid)) {
         currentServerSessionId = sid;
@@ -903,7 +911,7 @@ if (btnResetAll) {
 }
 
 // ===============================
-// ログイン（nullガード付き）
+// ログイン（nullガード + interval多重起動防止）
 // ===============================
 if (btnUnlock) btnUnlock.addEventListener("click", unlock);
 if (pwInput) {
@@ -922,16 +930,19 @@ function unlock() {
   if (lockScreen) lockScreen.style.display = "none";
   if (adminContent) adminContent.style.display = "block";
 
-  setupAllCanvasesHiDPI(); // ←表示後にDPR調整
+  setupAllCanvasesHiDPI();
 
-  fetchResults();
-  setInterval(fetchResults, 1000);
-
-  if (!animationStarted && ctx) {
-    animationStarted = true;
-    requestAnimationFrame(drawLineChart);
+  // ✅ 多重起動防止
+  if (pollingTimerId != null) {
+    clearInterval(pollingTimerId);
+    pollingTimerId = null;
   }
 
+  fetchResults();
+  pollingTimerId = setInterval(fetchResults, 1000);
+
+  // 初期描画
   drawPrevSessions();
   drawSessionChain();
+  drawLineChart();
 }
