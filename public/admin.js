@@ -1,12 +1,25 @@
 // ===============================
-// admin.js（興味率：カード/現在/過去/連結 + コメント保存＆色分け + sessionId管理）
+// admin.js（興味率：カード/現在/過去/連結 + コメント保存＆色分け）
 // ===============================
 //
-// ✅ 現在セッション：直近投票で区間色分け（緑/暗グレー/ピンク）
-// ✅ 過去セッション：同じ仕組みで保存＆描画
-// ✅ 連結グラフ：従来通り
-// ✅ NEW: sessionId（セッション番号）をサーバから取得して表示＆リセットで更新
+// ✅ 平均スコア方式（普通でもグラフが動く） + ✅ 0地点スタート
+// ✅ 現在セッション：直近投票（差分）で「直近の線分」だけ色分け（緑/暗グレー/ピンク）
+// ✅ 過去セッション：現在セッションと同じ仕組み（点に choice を保存して区間ごと色分け）
+// ✅ 連結グラフ：今まで通り（finalRate をセッション色でつなぐ）
 //
+// ✅ NEW: server.js が /api/results で返す sessionId を監視し、
+//        セッションが変わったら admin 側も自動で内部状態をリセット（ズレ防止）
+//
+// - 気になる: +1
+// - 普通: 0
+// - 気にならない: -1
+// - 平均スコア = (気になる - 気にならない) / 全投票数
+// - 表示% = (平均スコア + 1) / 2 * 100 （0〜100に丸め）
+// - ただし「グラフの開始点」は 0% から始める（投票前の基準点）
+// - /api/results 互換: understood=気になる, notUnderstood=気にならない, neutral=普通
+// - コメントchoice互換: interested/neutral/not-interested, understood/not-understood も吸収
+//
+// ==== パスワード ====
 // 管理パスワード: cpa1968
 
 const ADMIN_PASSWORD = "cpa1968";
@@ -18,11 +31,11 @@ const pwInput = document.getElementById("admin-password");
 const btnUnlock = document.getElementById("btn-unlock");
 const lockMsg = document.getElementById("lock-message");
 
-const numUnderstood = document.getElementById("num-understood");
-const numNotUnderstood = document.getElementById("num-not-understood");
+const numUnderstood = document.getElementById("num-understood");          // (表示) 気になる
+const numNotUnderstood = document.getElementById("num-not-understood");  // (表示) 気にならない
 const numTotal = document.getElementById("num-total");
-const rateUnderstood = document.getElementById("rate-understood");
-const numNeutral = document.getElementById("num-neutral");
+const rateUnderstood = document.getElementById("rate-understood");        // 興味度(カード)
+const numNeutral = document.getElementById("num-neutral");                // （任意）普通の票数
 
 const canvas = document.getElementById("sineCanvas");
 const ctx = canvas.getContext("2d");
@@ -40,9 +53,6 @@ const btnResetAll = document.getElementById("btn-reset-all");
 const themeInput = document.getElementById("theme-input");
 const btnSaveTheme = document.getElementById("btn-save-theme");
 const themeInfo = document.getElementById("theme-info");
-
-// （任意）HTMLに <span id="session-id"></span> があれば表示する
-const sessionIdLabel = document.getElementById("session-id");
 
 // 過去セッション用キャンバス（4枠）
 const prevCanvases = [
@@ -70,29 +80,44 @@ const sessionChainCanvas = document.getElementById("sessionChain");
 const sessionChainCtx = sessionChainCanvas ? sessionChainCanvas.getContext("2d") : null;
 
 // ==== 状態 ====
-let history = []; // [{ ts, rate, choice }]
+// 現在セッションの履歴 [{ ts, rate, choice }]
+let history = [];
+
+// prevSessions は「新しい順（0番が最新）」で保存される（unshift）
+// { resetNo, color, points:[{ts,rate,choice?}], finalRate, comments:[{ts,text,choice}] }
 let prevSessions = [];
+
 let resetCount = 0;
 
+// ★ 4つ目を黄色に（過去/連結のセッション色用）
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a", "#ffd600"];
+
 let animationStarted = false;
+
+// ★ 最新取得した「現在セッションのコメント」（リセット直前に退避する）
 let latestCurrentComments = [];
+
+// ★ 0地点スタート用：初期点を入れたか
 let basePointInserted = false;
 
-let lastCounts = null;
-let lastActionChoice = null;
+// ★ 直近投票判定用（前回の集計値）
+let lastCounts = null; // { pos, neu, neg, total }
 
-// ✅ NEW: 現在の sessionId（投票者側が「1セッション1回」を判定するキー）
-let currentSessionId = null;
+// ★ 直近投票の表示用（任意）
+let lastActionChoice = null; // 'positive' | 'neutral' | 'negative' | null
 
-// ==== 色（投票色） ====
+// ✅ NEW: サーバセッションID監視
+let currentServerSessionId = null;
+
+// ==== 色（直近投票の色：ユーザー指定と同じ） ====
 const CHOICE_COLORS = {
-  positive: "#22c55e",
-  neutral:  "#334155",
-  negative: "#ec4899",
-  none:     "#94a3b8",
+  positive: "#22c55e", // 気になる＝緑
+  neutral:  "#334155", // 普通＝暗めグレー
+  negative: "#ec4899", // 気にならない＝ピンク
+  none:     "#94a3b8", // 未確定
 };
 
+// 白ベースのキャンバステーマ（見やすさ）
 const CANVAS_THEME = {
   bg: "#ffffff",
   axis: "#111827",
@@ -102,6 +127,7 @@ const CANVAS_THEME = {
   subText: "#475569",
 };
 
+// ==== ユーティリティ ====
 function getCurrentColor() {
   const idx = Math.min(resetCount, SESSION_COLORS.length - 1);
   return SESSION_COLORS[idx];
@@ -138,14 +164,21 @@ function choiceToColor(choice) {
   return CHOICE_COLORS.none;
 }
 
+// choice の互換吸収（旧/新どっちでも動くように）
 function normalizeChoice(choice) {
+  // 新：投票側/サーバ側想定
   if (choice === "interested") return "positive";
   if (choice === "neutral") return "neutral";
   if (choice === "not-interested") return "negative";
+
+  // 旧：admin側で使ってた表現
   if (choice === "positive") return "positive";
   if (choice === "negative") return "negative";
+
+  // 旧々：2択互換
   if (choice === "understood") return "positive";
   if (choice === "not-understood") return "negative";
+
   return "neutral";
 }
 
@@ -160,61 +193,104 @@ function normalizeComments(comments) {
     .filter(c => c.text.trim().length > 0 || c.ts);
 }
 
+// ✅ 平均スコア方式（0〜100%）
 function calcInterestRateAvg(pos, neu, neg) {
   const totalVotes = (Number(pos) || 0) + (Number(neu) || 0) + (Number(neg) || 0);
   if (totalVotes <= 0) return null;
+
   const scoreSum = (Number(pos) || 0) - (Number(neg) || 0);
   const avg = scoreSum / totalVotes; // -1..+1
   const pct = (avg + 1) / 2; // 0..1
   return clamp100(pct * 100);
 }
 
+// ✅ 0地点スタート：まだ点が無いときに 0% を1点入れる
 function ensureBasePoint() {
   if (basePointInserted) return;
   if (history.length > 0) return;
+
   history.push({ ts: Date.now(), rate: 0, choice: null });
   basePointInserted = true;
 }
 
+// ✅ 「直近で何が押されたか」を前回集計との差分で推定
 function detectLastActionChoice(pos, neu, neg) {
   if (!lastCounts) return null;
+
   const dPos = pos - lastCounts.pos;
   const dNeu = neu - lastCounts.neu;
   const dNeg = neg - lastCounts.neg;
+
   const inc = dPos + dNeu + dNeg;
   if (inc <= 0) return null;
 
   let choice = null;
   let maxDelta = 0;
+
   if (dPos > maxDelta) { maxDelta = dPos; choice = "positive"; }
   if (dNeu > maxDelta) { maxDelta = dNeu; choice = "neutral"; }
   if (dNeg > maxDelta) { maxDelta = dNeg; choice = "negative"; }
+
   return choice;
 }
 
+// ✅ NEW: サーバセッションが変わった時に admin 内部状態を初期化
+function onServerSessionChanged(newSessionId) {
+  // サーバ reset による切替が起きた時に、ズレを完全に消す
+  currentServerSessionId = newSessionId;
+
+  resetCount = 0;          // admin表示上の “現在セッション色” を先頭に戻す（※見た目の色管理）
+  history = [];
+  latestCurrentComments = [];
+  basePointInserted = false;
+
+  lastCounts = null;
+  lastActionChoice = null;
+
+  // 現在キャンバスを即クリア
+  try {
+    ctx.fillStyle = CANVAS_THEME.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } catch {}
+
+  ensureBasePoint();
+}
+
+// ==== 結果取得 ====
 async function fetchResults() {
   try {
     const res = await fetch("/api/results", { cache: "no-store" });
     if (!res.ok) throw new Error("failed to fetch results");
+
     const data = await res.json();
 
-    // ✅ NEW: sessionId を拾う（サーバが返す想定）
-    currentSessionId = data.sessionId ?? currentSessionId;
-    if (sessionIdLabel) sessionIdLabel.textContent = currentSessionId == null ? "—" : String(currentSessionId);
+    // ✅ NEW: サーバセッションIDを監視して、変わったら初期化
+    const sid = Number(data.sessionId);
+    if (Number.isFinite(sid)) {
+      if (currentServerSessionId == null) currentServerSessionId = sid;
+      if (sid !== currentServerSessionId) {
+        onServerSessionChanged(sid);
+      }
+    }
 
+    // /api/results 互換：understood=気になる, notUnderstood=気にならない, neutral=普通
     const pos = Number(data.interested ?? data.positive ?? data.understood ?? 0);
     const neu = Number(data.neutral ?? 0);
     const neg = Number(data.notInterested ?? data.negative ?? data.notUnderstood ?? 0);
+
     const total = pos + neu + neg;
 
+    // 表示
     numUnderstood.textContent = String(pos);
     numNotUnderstood.textContent = String(neg);
     numTotal.textContent = String(total);
     if (numNeutral) numNeutral.textContent = String(neu);
 
+    // 興味度%（平均スコア方式）
     const rate = calcInterestRateAvg(pos, neu, neg);
     rateUnderstood.textContent = rate === null ? "--%" : `${Math.round(rate)}%`;
 
+    // 想定人数（進捗）
     const maxP = Number(data.maxParticipants ?? 0);
     if (document.activeElement !== maxInput) maxInput.value = maxP;
 
@@ -224,18 +300,23 @@ async function fetchResults() {
       maxInfo.textContent = `想定人数が未設定です（先に人数を保存してください）`;
     }
 
+    // テーマ
     const theme = data.theme || "";
     themeInfo.textContent = theme ? `現在のテーマ：${theme}` : "現在のテーマ：未設定";
     if (document.activeElement !== themeInput) themeInput.value = theme;
 
+    // コメント
     latestCurrentComments = normalizeComments(data.comments || []);
     renderCommentTimeline(latestCurrentComments);
 
+    // ✅ 直近投票を差分で推定
     const detected = detectLastActionChoice(pos, neu, neg);
     if (detected) lastActionChoice = detected;
 
+    // 次回の差分判定用に更新
     lastCounts = { pos, neu, neg, total };
 
+    // ✅ 0地点スタート
     if (total === 0) {
       ensureBasePoint();
       lastActionChoice = null;
@@ -254,19 +335,25 @@ async function fetchResults() {
   }
 }
 
+// ==== 履歴管理 ====
 function addRatePoint(rate, choice) {
   if (rate === null) return;
+
   const last = history[history.length - 1];
+
+  // rateが同じでも「直近票の種類」が変わったら点を追加して色変化させる
   if (last && last.rate === rate && (choice == null || last.choice === choice)) return;
 
   history.push({ ts: Date.now(), rate, choice: choice ?? null });
   if (history.length > 300) history = history.slice(-300);
 }
 
+// ==== 現在セッション描画（直近票で区間色分け） ====
 function drawLineChart() {
   const w = canvas.width;
   const h = canvas.height;
 
+  // 白ベース
   ctx.fillStyle = CANVAS_THEME.bg;
   ctx.fillRect(0, 0, w, h);
 
@@ -276,6 +363,7 @@ function drawLineChart() {
   const plotW = w - L - R;
   const plotH = h - T - B;
 
+  // 軸
   ctx.strokeStyle = CANVAS_THEME.axis;
   ctx.lineWidth = 3;
   ctx.setLineDash([]);
@@ -285,6 +373,7 @@ function drawLineChart() {
   ctx.lineTo(w - R, h - B);
   ctx.stroke();
 
+  // 横線
   const yTicks = [0, 25, 50, 75, 100];
   ctx.font = "22px sans-serif";
   ctx.textAlign = "right";
@@ -292,18 +381,22 @@ function drawLineChart() {
 
   yTicks.forEach(v => {
     const y = valueToY(v, h, B, plotH);
+
     ctx.strokeStyle = v === 0 ? CANVAS_THEME.gridStrong : CANVAS_THEME.grid;
     ctx.lineWidth = v === 0 ? 2.5 : 1.5;
     ctx.setLineDash(v === 0 ? [] : [8, 8]);
+
     ctx.beginPath();
     ctx.moveTo(L, y);
     ctx.lineTo(w - R, y);
     ctx.stroke();
+
     ctx.setLineDash([]);
     ctx.fillStyle = CANVAS_THEME.subText;
     ctx.fillText(v + "%", L - 10, y);
   });
 
+  // 縦点線
   ctx.strokeStyle = CANVAS_THEME.grid;
   ctx.lineWidth = 1.5;
   ctx.setLineDash([8, 8]);
@@ -316,11 +409,13 @@ function drawLineChart() {
   });
   ctx.setLineDash([]);
 
+  // 区間ごと色分け（p1.choice）
   const stepX = history.length > 1 ? plotW / (history.length - 1) : 0;
 
   for (let i = 1; i < history.length; i++) {
     const p0 = history[i - 1];
     const p1 = history[i];
+
     const x0 = L + (i - 1) * stepX;
     const y0 = valueToY(p0.rate, h, B, plotH);
     const x1 = L + i * stepX;
@@ -334,6 +429,7 @@ function drawLineChart() {
     ctx.stroke();
   }
 
+  // 点
   const r = 4;
   for (let i = 0; i < history.length; i++) {
     const p = history[i];
@@ -351,12 +447,14 @@ function drawLineChart() {
     ctx.fill();
   }
 
+  // タイトル
   ctx.font = "24px sans-serif";
   ctx.fillStyle = CANVAS_THEME.text;
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.fillText("現在セッション興味度推移（直近票で色変化 / 0%スタート）", L, 10);
 
+  // 直近投票表示（任意：何が押されたか）
   const label = `直近の投票：${choiceToLabel(lastActionChoice)}`;
   ctx.font = "20px sans-serif";
   ctx.textAlign = "right";
@@ -364,12 +462,21 @@ function drawLineChart() {
   ctx.fillStyle = CANVAS_THEME.subText;
   ctx.fillText(label, w - R, 12);
 
+  // 色チップ
+  const chipW = 14, chipH = 10;
+  ctx.fillStyle = choiceToColor(lastActionChoice);
+  ctx.fillRect(w - R - chipW - 8, 16, chipW, chipH);
+  ctx.strokeStyle = CANVAS_THEME.gridStrong;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(w - R - chipW - 8, 16, chipW, chipH);
+
   requestAnimationFrame(drawLineChart);
 }
 
+// ==== 過去セッション描画（現在セッションと同じ仕組み：区間ごと色分け） ====
 function drawPrevSessions() {
-  const maxSlots = prevCanvases.length;
-  const sessionsForDisplay = prevSessions.slice(0, maxSlots);
+  const maxSlots = prevCanvases.length; // 4
+  const sessionsForDisplay = prevSessions.slice(0, maxSlots); // 新しい→古い
 
   for (let i = 0; i < maxSlots; i++) {
     const session = sessionsForDisplay[i];
@@ -377,15 +484,18 @@ function drawPrevSessions() {
     const note = prevNotes[i];
     const rateLabel = prevRateLabels[i];
     const pctx = prevCtxs[i];
+
     if (!c || !pctx) continue;
 
     const w = c.width;
     const h = c.height;
 
+    // 白ベース
     pctx.fillStyle = "#ffffff";
     pctx.fillRect(0, 0, w, h);
 
     const shownResetNo = session?.resetNo ?? (resetCount - i > 0 ? (resetCount - i) : "—");
+
     if (!session || !Array.isArray(session.points) || session.points.length === 0) {
       if (note) note.textContent = `${shownResetNo}回目のリセットセッション：まだグラフはありません。`;
       if (rateLabel) rateLabel.textContent = "";
@@ -393,11 +503,13 @@ function drawPrevSessions() {
     }
 
     if (note) note.textContent = `${session.resetNo}回目のリセットセッション：興味度の推移（直近票で色変化）`;
+
     if (rateLabel) {
       const lastRate = clamp100(Number(session.finalRate ?? 0));
       rateLabel.textContent = `（最終興味度：${Math.round(lastRate)}%）`;
     }
 
+    // 0%開始点を追加（choiceはnone扱い）
     const orig = session.points || [];
     const firstTs = orig[0]?.ts ?? Date.now();
     const hist = [{ ts: firstTs, rate: 0, choice: null }, ...orig.map(p => ({
@@ -410,8 +522,10 @@ function drawPrevSessions() {
     const plotW = w - L - R;
     const plotH = h - T - B;
 
+    // 軸
     pctx.strokeStyle = "#111827";
     pctx.lineWidth = 2.5;
+    pctx.setLineDash([]);
     pctx.beginPath();
     pctx.moveTo(L, T);
     pctx.lineTo(L, h - B);
@@ -422,6 +536,7 @@ function drawPrevSessions() {
     pctx.font = "16px sans-serif";
     pctx.textAlign = "right";
     pctx.textBaseline = "middle";
+
     yTicks.forEach(v => {
       const y = valueToY(v, h, B, plotH);
       pctx.strokeStyle = v === 0 ? "#cbd5e1" : "#e5e7eb";
@@ -431,15 +546,19 @@ function drawPrevSessions() {
       pctx.moveTo(L, y);
       pctx.lineTo(w - R, y);
       pctx.stroke();
+
       pctx.setLineDash([]);
       pctx.fillStyle = "#475569";
       pctx.fillText(v + "%", L - 8, y);
     });
 
+    // 区間ごと色分け（p1.choice）
     const stepX = hist.length > 1 ? plotW / (hist.length - 1) : 0;
+
     for (let k = 1; k < hist.length; k++) {
       const p0 = hist[k - 1];
       const p1 = hist[k];
+
       const x0 = L + (k - 1) * stepX;
       const y0 = valueToY(p0.rate, h, B, plotH);
       const x1 = L + k * stepX;
@@ -455,17 +574,22 @@ function drawPrevSessions() {
   }
 }
 
+// ==== 連結グラフ（最大4件）※今まで通り（finalRateをセッション色でつなぐ） ====
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
   const w = sessionChainCanvas.width;
   const h = sessionChainCanvas.height;
 
+  // 白ベース
   sessionChainCtx.fillStyle = "#ffffff";
   sessionChainCtx.fillRect(0, 0, w, h);
 
   const sessionsNewestFirst = prevSessions.slice(0, 4);
-  const sessionsOldestFirst = sessionsNewestFirst.slice().reverse().filter(s => s && s.points && s.points.length > 0);
+  const sessionsOldestFirst = sessionsNewestFirst
+    .slice()
+    .reverse()
+    .filter(s => s && s.points && s.points.length > 0);
 
   if (sessionsOldestFirst.length === 0) {
     sessionChainCtx.fillStyle = "#64748b";
@@ -479,6 +603,7 @@ function drawSessionChain() {
   const chainPoints = [];
   const firstSessionColor = sessionsOldestFirst[0].color || SESSION_COLORS[0];
 
+  // 0%スタート
   chainPoints.push({ rate: 0, color: firstSessionColor, isSessionPoint: false });
 
   sessionsOldestFirst.forEach((session, idx) => {
@@ -491,8 +616,10 @@ function drawSessionChain() {
   const plotW = w - L - R;
   const plotH = h - T - B;
 
+  // 軸
   sessionChainCtx.strokeStyle = "#111827";
   sessionChainCtx.lineWidth = 3;
+  sessionChainCtx.setLineDash([]);
   sessionChainCtx.beginPath();
   sessionChainCtx.moveTo(L, T);
   sessionChainCtx.lineTo(L, h - B);
@@ -503,15 +630,19 @@ function drawSessionChain() {
   sessionChainCtx.font = "18px sans-serif";
   sessionChainCtx.textAlign = "right";
   sessionChainCtx.textBaseline = "middle";
+
   yTicks.forEach(v => {
     const y = valueToY(v, h, B, plotH);
+
     sessionChainCtx.strokeStyle = v === 0 ? "#cbd5e1" : "#e5e7eb";
     sessionChainCtx.lineWidth = v === 0 ? 2.5 : 1.5;
     sessionChainCtx.setLineDash(v === 0 ? [] : [10, 10]);
+
     sessionChainCtx.beginPath();
     sessionChainCtx.moveTo(L, y);
     sessionChainCtx.lineTo(w - R, y);
     sessionChainCtx.stroke();
+
     sessionChainCtx.setLineDash([]);
     sessionChainCtx.fillStyle = "#475569";
     sessionChainCtx.fillText(v + "%", L - 10, y);
@@ -525,9 +656,13 @@ function drawSessionChain() {
   chainPoints.forEach((pt, idx) => {
     const x = L + stepX * idx;
     const y = valueToY(pt.rate, h, B, plotH);
-    if (idx === 0) { lastX = x; lastY = y; return; }
 
-    // 連結は従来通り「セッション色」
+    if (idx === 0) {
+      lastX = x; lastY = y;
+      return;
+    }
+
+    // ✅ 連結は今まで通り「セッション色」
     sessionChainCtx.strokeStyle = pt.color;
     sessionChainCtx.lineWidth = 4;
     sessionChainCtx.beginPath();
@@ -538,6 +673,30 @@ function drawSessionChain() {
     lastX = x; lastY = y;
   });
 
+  const pointRadius = 7;
+  chainPoints.forEach((pt, idx) => {
+    if (!pt.isSessionPoint) return;
+
+    const x = L + stepX * idx;
+    const y = valueToY(pt.rate, h, B, plotH);
+
+    sessionChainCtx.beginPath();
+    sessionChainCtx.arc(x, y, pointRadius + 2, 0, Math.PI * 2);
+    sessionChainCtx.fillStyle = "#ffffff";
+    sessionChainCtx.fill();
+
+    sessionChainCtx.beginPath();
+    sessionChainCtx.arc(x, y, pointRadius, 0, Math.PI * 2);
+    sessionChainCtx.fillStyle = pt.color;
+    sessionChainCtx.fill();
+
+    sessionChainCtx.font = "16px sans-serif";
+    sessionChainCtx.textAlign = "center";
+    sessionChainCtx.textBaseline = "bottom";
+    sessionChainCtx.fillStyle = pt.color;
+    sessionChainCtx.fillText(`${Math.round(pt.rate)}%`, x, y - pointRadius - 8);
+  });
+
   sessionChainCtx.font = "22px sans-serif";
   sessionChainCtx.fillStyle = "#111827";
   sessionChainCtx.textAlign = "left";
@@ -545,8 +704,10 @@ function drawSessionChain() {
   sessionChainCtx.fillText("セッション1→2→3→4 最終興味度 連結グラフ（0%スタート）", L, 22);
 }
 
+// ==== コメント表示（現在 + 過去保存分を統合） ====
 function renderCommentTimeline(currentComments) {
   commentList.innerHTML = "";
+
   const currentColor = getCurrentColor();
 
   const nowItems = (normalizeComments(currentComments) || []).map(c => ({
@@ -562,11 +723,17 @@ function renderCommentTimeline(currentComments) {
     const color = s.color || "#888";
     const comments = normalizeComments(s.comments || []);
     comments.forEach(c => {
-      pastItems.push({ ...c, sessionLabel: label, sessionColor: color, sessionOrder: s.resetNo ?? 0 });
+      pastItems.push({
+        ...c,
+        sessionLabel: label,
+        sessionColor: color,
+        sessionOrder: s.resetNo ?? 0,
+      });
     });
   });
 
   const all = [...nowItems, ...pastItems];
+
   if (all.length === 0) {
     const p = document.createElement("p");
     p.textContent = "まだコメントはありません。";
@@ -585,21 +752,41 @@ function renderCommentTimeline(currentComments) {
     const meta = document.createElement("div");
     meta.className = "comment-meta";
 
+    const dot = document.createElement("span");
+    dot.style.display = "inline-block";
+    dot.style.width = "10px";
+    dot.style.height = "10px";
+    dot.style.borderRadius = "50%";
+    dot.style.background = c.sessionColor;
+    dot.style.marginRight = "8px";
+    dot.style.verticalAlign = "middle";
+
     const sessionSpan = document.createElement("span");
     sessionSpan.textContent = c.sessionLabel;
+    sessionSpan.style.marginRight = "10px";
     sessionSpan.style.color = c.sessionColor;
     sessionSpan.style.fontWeight = "700";
 
     const tag = document.createElement("span");
     const ch = normalizeChoice(c.choice);
-    if (ch === "positive") { tag.className = "comment-tag understood"; tag.textContent = "気になる"; }
-    else if (ch === "neutral") { tag.className = "comment-tag neutral"; tag.textContent = "普通"; }
-    else { tag.className = "comment-tag not-understood"; tag.textContent = "気にならない"; }
+    if (ch === "positive") {
+      tag.className = "comment-tag understood";
+      tag.textContent = "気になる";
+    } else if (ch === "neutral") {
+      tag.className = "comment-tag neutral";
+      tag.textContent = "普通";
+    } else {
+      tag.className = "comment-tag not-understood";
+      tag.textContent = "気にならない";
+    }
 
     const time = document.createElement("span");
-    try { time.textContent = new Date(safeTs(c.ts)).toLocaleString("ja-JP"); }
-    catch { time.textContent = String(c.ts || ""); }
+    let timeText = "";
+    try { timeText = new Date(safeTs(c.ts)).toLocaleString("ja-JP"); }
+    catch { timeText = String(c.ts || ""); }
+    time.textContent = timeText;
 
+    meta.appendChild(dot);
     meta.appendChild(sessionSpan);
     meta.appendChild(tag);
     meta.appendChild(time);
@@ -613,6 +800,7 @@ function renderCommentTimeline(currentComments) {
   });
 }
 
+// ==== 時刻表示 ====
 function updateTimeLabel() {
   if (!timeIndicator) return;
   const now = new Date();
@@ -623,10 +811,12 @@ function updateTimeLabel() {
 if (btnSaveMax && maxInput) {
   btnSaveMax.addEventListener("click", async () => {
     const num = Number(maxInput.value);
+
     if (!Number.isFinite(num) || num < 1 || num > 100) {
       alert("1〜100 の範囲で人数を入力してください。");
       return;
     }
+
     try {
       const res = await fetch("/api/admin/max-participants", {
         method: "POST",
@@ -647,6 +837,7 @@ if (btnSaveMax && maxInput) {
 if (btnSaveTheme && themeInput) {
   btnSaveTheme.addEventListener("click", async () => {
     const theme = themeInput.value.trim();
+
     try {
       const res = await fetch("/api/admin/theme", {
         method: "POST",
@@ -664,6 +855,7 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
+// ※ server.js 側で sessionId が進むので、admin.js 側はレスポンスの sessionId で同期する
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
     const ok = confirm("現在セッションの票・コメント・グラフをリセットします。\n本当に実行しますか？");
@@ -674,6 +866,8 @@ if (btnReset) {
 
       if (history.length > 0) {
         const lastRate = clamp100(history[history.length - 1].rate);
+
+        // ✅ 過去セッションに「choice」付きで保存（現在セッションと同じ仕組み）
         const copy = history.map(p => ({
           ts: safeTs(p.ts),
           rate: clamp100(p.rate),
@@ -685,32 +879,43 @@ if (btnReset) {
 
         prevSessions.unshift({
           resetNo,
-          color: currentColor,
-          points: copy,
+          color: currentColor,   // 連結グラフ用のセッション色（従来通り）
+          points: copy,          // ✅ choice も保存
           finalRate: lastRate,
           comments: savedComments,
         });
 
         if (prevSessions.length > 4) prevSessions = prevSessions.slice(0, 4);
+
         drawPrevSessions();
         drawSessionChain();
         renderCommentTimeline([]);
       }
 
-      // ✅ NEW: サーバ側セッションIDを進める（後述のサーバ修正で追加）
-      const bump = await fetch("/api/admin/bump-session", { method: "POST" });
-      if (!bump.ok) throw new Error("failed to bump session");
-
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      resetCount++;
-      history = [];
-      latestCurrentComments = [];
-      basePointInserted = false;
+      // ✅ server の sessionId に同期（重要）
+      let newSid = null;
+      try {
+        const j = await res.json();
+        newSid = Number(j?.sessionId);
+      } catch {}
+      if (Number.isFinite(newSid)) {
+        onServerSessionChanged(newSid);
+      } else {
+        // もし sessionId が返らない環境でも破綻しないように
+        resetCount++;
+        history = [];
+        latestCurrentComments = [];
+        basePointInserted = false;
+        lastCounts = null;
+        lastActionChoice = null;
+        ensureBasePoint();
+      }
 
-      lastCounts = null;
-      lastActionChoice = null;
+      // 見た目セッション色のローテは従来通り
+      resetCount++;
 
       await fetchResults();
       drawPrevSessions();
@@ -734,9 +939,12 @@ if (btnResetAll) {
       const res = await fetch("/api/admin/reset-all", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset all");
 
-      // ✅ NEW: セッションも初期化（後述のサーバ修正で追加）
-      const resetSession = await fetch("/api/admin/reset-session", { method: "POST" });
-      if (!resetSession.ok) throw new Error("failed to reset session");
+      // server の sessionId に同期
+      let sid = null;
+      try {
+        const j = await res.json();
+        sid = Number(j?.sessionId);
+      } catch {}
 
       history = [];
       prevSessions = [];
@@ -751,7 +959,15 @@ if (btnResetAll) {
       drawSessionChain();
       renderCommentTimeline([]);
 
+      if (Number.isFinite(sid)) {
+        onServerSessionChanged(sid);
+      } else {
+        currentServerSessionId = null;
+        ensureBasePoint();
+      }
+
       await fetchResults();
+
       alert("全投票データを完全リセットしました。");
     } catch (e) {
       console.error(e);
