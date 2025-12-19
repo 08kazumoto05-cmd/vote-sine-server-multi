@@ -1,166 +1,176 @@
-// vote.js（興味度アンケート用・API完全対応版）
-// ✅ 同一セッション内は「1回だけ投票」（= このページ表示中は1回のみ）
-// ✅ 「ページ更新したら投票可能に戻す」（= メモリ管理なのでリロードで解除）
-// ✅ 「管理者がリセットしたら投票可能に戻す」（= server sessionId を監視して解除）
+// vote.js（興味度アンケート用・耐性版）
+// ✅ 投票ボタンIDが違っても動くように複数候補から拾う
+// ✅ confirm が出ない問題（イベント未付与 / aタグ遷移 / form送信）を潰す
+// ✅ 3択サーバ（interested/neutral/not-interested）に合わせて送る
+// ✅ コメントのみ送信は choice=null で送る
+// ✅ key を API にも引き継ぐ（?key=...）
 //
-// ✅ 修正点：URLの ?key=... を API にも必ず付けて送信（403/404対策）
-// ✅ 送信失敗時に、サーバからのエラー本文もできるだけ表示して原因特定しやすくする
-//
-// 注意：server.js 側は /api/results で sessionId を返すこと
+// 重要：vote.html 側のボタンIDがどれでも動くようにしている
 
 document.addEventListener("DOMContentLoaded", () => {
-  const btnUnderstood      = document.getElementById("btn-understood");       // 「興味がある」
-  const btnNotUnderstood   = document.getElementById("btn-not-understood");   // 「あまり興味がない」
-  const btnSendComment     = document.getElementById("btn-send-comment");     // コメントのみ送信
+  // -----------------------------
+  // DOM
+  // -----------------------------
+  const message      = document.getElementById("message");
+  const commentInput = document.getElementById("comment-input");
+  const themeTitle   = document.getElementById("theme-title");
 
-  const message            = document.getElementById("message");
-  const commentInput       = document.getElementById("comment-input");
-  const themeTitle         = document.getElementById("theme-title");
+  // コメント送信ボタンは id がこれの想定（違っても data-comment-send でも拾う）
+  const btnSendComment =
+    document.getElementById("btn-send-comment") ||
+    document.querySelector("[data-comment-send='1']");
 
-  // =============================
-  // 重要：投票済みは「メモリだけ」で管理 → リロードしたら必ず投票可能に戻る
-  // =============================
-  let votedInThisPage = false;
+  // ✅ 投票ボタン候補（あなたの過去コード分も全部拾う）
+  const btnInterested =
+    document.getElementById("btn-interested") ||        // 3択版
+    document.getElementById("btn-understood") ||        // 2択版（興味あり）
+    document.querySelector("[data-choice='interested'],[data-choice='understood']");
 
-  // sessionId は「管理者リセット検知」にだけ使う
-  let lastSeenSessionId = null;
+  const btnNeutral =
+    document.getElementById("btn-neutral") ||
+    document.querySelector("[data-choice='neutral']");
 
-  // =============================
-  // ✅ key を現在URLから取得して、APIにも付ける
-  // =============================
+  const btnNotInterested =
+    document.getElementById("btn-not-interested") ||    // 3択版
+    document.getElementById("btn-not-understood") ||    // 2択版（興味なし）
+    document.querySelector("[data-choice='not-interested'],[data-choice='not-understood']");
+
+  // -----------------------------
+  // key を現在URLから取得して API に付与
+  // -----------------------------
   const urlParams = new URLSearchParams(window.location.search);
-  const accessKey = urlParams.get("key"); // vote.html?key=...
+  const accessKey = urlParams.get("key");
+
   function apiUrl(path) {
-    // /api/vote などに key を付けて叩く（サーバ側がkey不要でも害はない）
     if (!accessKey) return path;
     const sep = path.includes("?") ? "&" : "?";
     return `${path}${sep}key=${encodeURIComponent(accessKey)}`;
   }
 
+  // -----------------------------
+  // UI
+  // -----------------------------
   function setMessage(text) {
     if (!message) return;
     message.textContent = text;
   }
 
-  function setButtonsEnabled(enabled) {
-    const dis = !enabled;
-    if (btnUnderstood) btnUnderstood.disabled = dis;
-    if (btnNotUnderstood) btnNotUnderstood.disabled = dis;
+  function disableVoteButtons(disabled) {
+    const dis = !!disabled;
+    if (btnInterested) btnInterested.disabled = dis;
+    if (btnNeutral) btnNeutral.disabled = dis;
+    if (btnNotInterested) btnNotInterested.disabled = dis;
   }
 
-  function applyVoteLockUI() {
-    if (votedInThisPage) {
-      setButtonsEnabled(false);
-      setMessage("このセッションでは投票済みです。（ページ更新、または管理者のリセットで再投票できます）");
-    } else {
-      setButtonsEnabled(true);
-    }
-  }
+  // -----------------------------
+  // sessionId 監視（管理者リセットで投票可能に戻す）
+  // ※「ページ更新で投票可能に戻す」はメモリ管理なので自動で満たす
+  // -----------------------------
+  let votedInThisPage = false;
+  let lastSeenSessionId = null;
 
-  // =============================
-  // 失敗時にレスポンス本文をなるべく読む（原因が見える）
-  // =============================
-  async function readErrorText(res) {
-    try {
-      const ct = (res.headers.get("content-type") || "").toLowerCase();
-      if (ct.includes("application/json")) {
-        const j = await res.json();
-        if (j && typeof j === "object") {
-          if (j.error) return String(j.error);
-          return JSON.stringify(j);
-        }
-      }
-      const t = await res.text();
-      return t ? t.slice(0, 300) : "";
-    } catch {
-      return "";
-    }
-  }
-
-  // =============================
-  // /api/results からテーマ＆sessionId取得
-  // =============================
   async function fetchThemeAndSession() {
     try {
       const res = await fetch(apiUrl("/api/results"), { cache: "no-store" });
-      if (!res.ok) {
-        const extra = await readErrorText(res);
-        throw new Error(`results fetch failed: ${res.status} ${extra}`);
-      }
+      if (!res.ok) return;
 
       const data = await res.json();
 
-      // テーマ
       if (typeof data.theme === "string" && themeTitle) {
         themeTitle.textContent = data.theme;
       }
 
-      // sessionId（管理者リセットで増える想定）
       const sid = Number(data.sessionId);
       if (Number.isFinite(sid) && sid >= 1) {
         if (lastSeenSessionId == null) {
           lastSeenSessionId = sid;
         } else if (lastSeenSessionId !== sid) {
-          // ✅ 管理者がリセットした：投票可能に戻す
           lastSeenSessionId = sid;
           votedInThisPage = false;
-          setButtonsEnabled(true);
+          disableVoteButtons(false);
           setMessage("管理者がセッションをリセットしました。投票が再び可能です。");
         }
       }
 
-      applyVoteLockUI();
+      // UI反映
+      if (votedInThisPage) {
+        disableVoteButtons(true);
+        setMessage("このページ表示中は投票済みです。（更新 or 管理者リセットで再投票できます）");
+      } else {
+        disableVoteButtons(false);
+      }
     } catch (e) {
       console.error(e);
-      // 取得失敗してもUIは止めない
-      applyVoteLockUI();
     }
   }
 
-  // 初回取得 + 監視
   fetchThemeAndSession();
   setInterval(fetchThemeAndSession, 1500);
 
-  // =============================
-  // 投票送信（共通）
-  // =============================
-  async function postVote(choice, confirmText, successText) {
+  // -----------------------------
+  // choice 正規化：2択表記が来ても 3択サーバに合わせる
+  // -----------------------------
+  function normalizeChoice(choice) {
+    if (choice === "understood") return "interested";
+    if (choice === "not-understood") return "not-interested";
+    if (choice === "interested") return "interested";
+    if (choice === "neutral") return "neutral";
+    if (choice === "not-interested") return "not-interested";
+    return null;
+  }
+
+  async function postVote(rawChoice, confirmText, successText) {
     if (votedInThisPage) {
-      applyVoteLockUI();
+      disableVoteButtons(true);
+      setMessage("このページ表示中は投票済みです。（更新 or 管理者リセットで再投票できます）");
       return;
     }
+
+    const choice = normalizeChoice(rawChoice);
+    if (!choice) {
+      setMessage("投票の種類が不正です（ボタン設定を確認してください）。");
+      return;
+    }
+
+    // ✅ iOSで aタグ/フォーム送信があると confirm 前に遷移することがあるので、
+    // ハンドラ側で必ず preventDefault/stopPropagation を入れる（後述）
 
     const ok = confirm(confirmText);
     if (!ok) return;
 
     try {
-      // 投票直前にも同期（リセット直後のズレ防止）
+      // 念のため同期
       await fetchThemeAndSession();
-
-      if (votedInThisPage) {
-        applyVoteLockUI();
-        return;
-      }
 
       const res = await fetch(apiUrl("/api/vote"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          choice, // "understood" / "not-understood" を送ってOK（server側で互換変換）
+          choice, // interested / neutral / not-interested
           comment: (commentInput?.value || "").trim()
         })
       });
 
       if (!res.ok) {
-        const extra = await readErrorText(res);
+        // 失敗理由をできるだけ出す
+        let extra = "";
+        try {
+          const ct = (res.headers.get("content-type") || "").toLowerCase();
+          if (ct.includes("application/json")) {
+            const j = await res.json();
+            extra = j?.error ? String(j.error) : JSON.stringify(j);
+          } else {
+            extra = (await res.text()).slice(0, 200);
+          }
+        } catch {}
         setMessage(`送信エラーが発生しました。（${res.status}）${extra ? "：" + extra : ""}`);
         return;
       }
 
       votedInThisPage = true;
-      applyVoteLockUI();
-
+      disableVoteButtons(true);
       setMessage(successText);
+
       if (commentInput) commentInput.value = "";
     } catch (e) {
       console.error(e);
@@ -168,33 +178,60 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // 「興味がある」
-  if (btnUnderstood) {
-    btnUnderstood.addEventListener("click", async () => {
-      await postVote(
-        "understood",
-        "本当に『興味がある』で回答しますか？",
-        "『興味がある』で回答しました。ありがとうございました！"
-      );
-    });
+  // -----------------------------
+  // ✅ クリックイベントを確実に付与（aタグ/フォームでもOK）
+  // -----------------------------
+  function bindVoteButton(btn, rawChoice, confirmText, successText) {
+    if (!btn) return;
+
+    // 既にdisabledになってるなら解除（「押せない」を潰す）
+    btn.disabled = false;
+
+    btn.addEventListener(
+      "click",
+      async (e) => {
+        // ✅ ここが重要：リンク遷移やフォーム送信を止める
+        e.preventDefault?.();
+        e.stopPropagation?.();
+
+        await postVote(rawChoice, confirmText, successText);
+      },
+      { passive: false }
+    );
   }
 
-  // 「あまり興味がない」
-  if (btnNotUnderstood) {
-    btnNotUnderstood.addEventListener("click", async () => {
-      await postVote(
-        "not-understood",
-        "本当に『あまり興味がない』で回答しますか？",
-        "『あまり興味がない』で回答しました。ありがとうございました！"
-      );
-    });
-  }
+  // 「気になる / 興味がある」
+  bindVoteButton(
+    btnInterested,
+    "interested",
+    "本当に『気になる（興味がある）』で回答しますか？",
+    "『気になる（興味がある）』で回答しました。ありがとうございました！"
+  );
 
-  // =============================
+  // 「普通」
+  bindVoteButton(
+    btnNeutral,
+    "neutral",
+    "本当に『普通』で回答しますか？",
+    "『普通』で回答しました。ありがとうございました！"
+  );
+
+  // 「気にならない / あまり興味がない」
+  bindVoteButton(
+    btnNotInterested,
+    "not-interested",
+    "本当に『気にならない（あまり興味がない）』で回答しますか？",
+    "『気にならない（あまり興味がない）』で回答しました。ありがとうございました！"
+  );
+
+  // -----------------------------
   // コメントのみ送信（投票ロックは掛けない）
-  // =============================
+  // -----------------------------
   if (btnSendComment && commentInput) {
-    btnSendComment.addEventListener("click", async () => {
+    btnSendComment.addEventListener("click", async (e) => {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+
       const text = commentInput.value.trim();
       if (!text) {
         setMessage("コメントが空です。");
@@ -204,7 +241,6 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         await fetchThemeAndSession();
 
-        // コメントだけ送る：server.js は choice なしでもOK（あなたの現在のserverならOK）
         const res = await fetch(apiUrl("/api/vote"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -215,25 +251,36 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         if (!res.ok) {
-          const extra = await readErrorText(res);
+          let extra = "";
+          try {
+            const ct = (res.headers.get("content-type") || "").toLowerCase();
+            if (ct.includes("application/json")) {
+              const j = await res.json();
+              extra = j?.error ? String(j.error) : JSON.stringify(j);
+            } else {
+              extra = (await res.text()).slice(0, 200);
+            }
+          } catch {}
           setMessage(`送信エラーが発生しました。（${res.status}）${extra ? "：" + extra : ""}`);
           return;
         }
 
         setMessage("コメントを送信しました。");
         commentInput.value = "";
-      } catch (e) {
-        console.error(e);
+      } catch (e2) {
+        console.error(e2);
         setMessage("送信エラーが発生しました。");
       }
     });
   }
 
-  // 初期UI
-  applyVoteLockUI();
-
-  // ✅ key が無いと投票ページとして成立しない想定なので注意表示
-  if (!accessKey) {
+  // -----------------------------
+  // ✅ ボタンが拾えてない場合に明示する（原因特定）
+  // -----------------------------
+  const foundVoteButtons = !!(btnInterested || btnNeutral || btnNotInterested);
+  if (!foundVoteButtons) {
+    setMessage("投票ボタンが見つかりません。vote.html のボタンID（btn-...）を確認してください。");
+  } else if (!accessKey) {
     setMessage("URLに key がありません。正しい投票URL（?key=...）で開いてください。");
   }
 });
