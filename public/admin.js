@@ -3,21 +3,10 @@
 // ===============================
 //
 // ✅ 平均スコア方式（普通でもグラフが動く） + ✅ 0地点スタート
-// ✅ 現在セッション：直近投票（差分）で「直近の線分」だけ色分け（緑/暗グレー/ピンク）
-// ✅ 過去セッション：現在セッションと同じ仕組み（点に choice を保存して区間ごと色分け）
-// ✅ 連結グラフ：今まで通り（finalRate をセッション色でつなぐ）
-//
-// ✅ NEW: server.js が /api/results で返す sessionId を監視し、
-//        セッションが変わったら admin 側も自動で内部状態をリセット（ズレ防止）
-//
-// - 気になる: +1
-// - 普通: 0
-// - 気にならない: -1
-// - 平均スコア = (気になる - 気にならない) / 全投票数
-// - 表示% = (平均スコア + 1) / 2 * 100 （0〜100に丸め）
-// - ただし「グラフの開始点」は 0% から始める（投票前の基準点）
-// - /api/results 互換: understood=気になる, notUnderstood=気にならない, neutral=普通
-// - コメントchoice互換: interested/neutral/not-interested, understood/not-understood も吸収
+// ✅ 現在セッション：直近投票（差分）で線分を色分け（緑/暗グレー/ピンク）
+// ✅ 過去セッション：1回目=青,2回目=赤,3回目=緑,4回目=黄 で保存（前の仕様に戻す）
+// ✅ 連結グラフ：上記セッション色で線を引き、最終興味度の点＋%表示（前の仕様）
+// ✅ server.js の sessionId を監視して resetCount を同期（sessionId-1）
 //
 // ==== パスワード ====
 // 管理パスワード: cpa1968
@@ -87,9 +76,10 @@ let history = [];
 // { resetNo, color, points:[{ts,rate,choice?}], finalRate, comments:[{ts,text,choice}] }
 let prevSessions = [];
 
+// resetCount = これまでの「リセット回数」（現在セッション番号-1）
 let resetCount = 0;
 
-// ★ 4つ目を黄色に（過去/連結のセッション色用）
+// ★ 前のシステムと同じ：1回目青 / 2回目赤 / 3回目緑 / 4回目黄
 const SESSION_COLORS = ["#4fc3f7", "#ff5252", "#66bb6a", "#ffd600"];
 
 let animationStarted = false;
@@ -106,10 +96,10 @@ let lastCounts = null; // { pos, neu, neg, total }
 // ★ 直近投票の表示用（任意）
 let lastActionChoice = null; // 'positive' | 'neutral' | 'negative' | null
 
-// ✅ NEW: サーバセッションID監視
+// ✅ サーバセッションID監視（server.js が /api/results で返す）
 let currentServerSessionId = null;
 
-// ==== 色（直近投票の色：ユーザー指定と同じ） ====
+// ==== 色（直近投票の色：ユーザー指定） ====
 const CHOICE_COLORS = {
   positive: "#22c55e", // 気になる＝緑
   neutral:  "#334155", // 普通＝暗めグレー
@@ -128,9 +118,15 @@ const CANVAS_THEME = {
 };
 
 // ==== ユーティリティ ====
-function getCurrentColor() {
-  const idx = Math.min(resetCount, SESSION_COLORS.length - 1);
+function sessionNoToColor(sessionNo) {
+  // sessionNo: 1,2,3,4,... を青赤緑黄に割り当て（4以降は繰り返し）
+  const idx = Math.max(0, (Number(sessionNo) || 1) - 1) % SESSION_COLORS.length;
   return SESSION_COLORS[idx];
+}
+
+function getCurrentColor() {
+  // 現在セッションの色（resetCount=0なら1回目=青）
+  return sessionNoToColor(resetCount + 1);
 }
 
 function clamp100(x) {
@@ -234,24 +230,21 @@ function detectLastActionChoice(pos, neu, neg) {
   return choice;
 }
 
-// ✅ NEW: サーバセッションが変わった時に admin 内部状態を初期化
-function onServerSessionChanged(newSessionId) {
-  // サーバ reset による切替が起きた時に、ズレを完全に消す
-  currentServerSessionId = newSessionId;
+// ✅ server の sessionId が変わった時に、現在セッション系の内部状態だけ初期化（色順は sessionId に同期）
+function syncWithServerSessionId(newSid) {
+  const sid = Number(newSid);
+  if (!Number.isFinite(sid) || sid < 1) return;
 
-  resetCount = 0;          // admin表示上の “現在セッション色” を先頭に戻す（※見た目の色管理）
+  // sessionId=1 => resetCount=0（1回目セッション）
+  resetCount = Math.max(0, sid - 1);
+
+  // 現在セッションの追跡だけ初期化
   history = [];
   latestCurrentComments = [];
   basePointInserted = false;
 
   lastCounts = null;
   lastActionChoice = null;
-
-  // 現在キャンバスを即クリア
-  try {
-    ctx.fillStyle = CANVAS_THEME.bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  } catch {}
 
   ensureBasePoint();
 }
@@ -264,12 +257,15 @@ async function fetchResults() {
 
     const data = await res.json();
 
-    // ✅ NEW: サーバセッションIDを監視して、変わったら初期化
+    // ✅ sessionId 同期（別端末のリセットでも色順ズレを防ぐ）
     const sid = Number(data.sessionId);
     if (Number.isFinite(sid)) {
-      if (currentServerSessionId == null) currentServerSessionId = sid;
-      if (sid !== currentServerSessionId) {
-        onServerSessionChanged(sid);
+      if (currentServerSessionId == null) {
+        currentServerSessionId = sid;
+        syncWithServerSessionId(sid);
+      } else if (sid !== currentServerSessionId) {
+        currentServerSessionId = sid;
+        syncWithServerSessionId(sid);
       }
     }
 
@@ -454,7 +450,7 @@ function drawLineChart() {
   ctx.textBaseline = "top";
   ctx.fillText("現在セッション興味度推移（直近票で色変化 / 0%スタート）", L, 10);
 
-  // 直近投票表示（任意：何が押されたか）
+  // 直近投票表示
   const label = `直近の投票：${choiceToLabel(lastActionChoice)}`;
   ctx.font = "20px sans-serif";
   ctx.textAlign = "right";
@@ -473,7 +469,7 @@ function drawLineChart() {
   requestAnimationFrame(drawLineChart);
 }
 
-// ==== 過去セッション描画（現在セッションと同じ仕組み：区間ごと色分け） ====
+// ==== 過去セッション描画（区間ごと色分け） ====
 function drawPrevSessions() {
   const maxSlots = prevCanvases.length; // 4
   const sessionsForDisplay = prevSessions.slice(0, maxSlots); // 新しい→古い
@@ -494,22 +490,20 @@ function drawPrevSessions() {
     pctx.fillStyle = "#ffffff";
     pctx.fillRect(0, 0, w, h);
 
-    const shownResetNo = session?.resetNo ?? (resetCount - i > 0 ? (resetCount - i) : "—");
-
     if (!session || !Array.isArray(session.points) || session.points.length === 0) {
-      if (note) note.textContent = `${shownResetNo}回目のリセットセッション：まだグラフはありません。`;
+      if (note) note.textContent = `—：まだグラフはありません。`;
       if (rateLabel) rateLabel.textContent = "";
       continue;
     }
 
-    if (note) note.textContent = `${session.resetNo}回目のリセットセッション：興味度の推移（直近票で色変化）`;
+    if (note) note.textContent = `${session.resetNo}回目セッション：興味度の推移（直近票で色変化）`;
 
     if (rateLabel) {
       const lastRate = clamp100(Number(session.finalRate ?? 0));
       rateLabel.textContent = `（最終興味度：${Math.round(lastRate)}%）`;
     }
 
-    // 0%開始点を追加（choiceはnone扱い）
+    // 0%開始点を追加
     const orig = session.points || [];
     const firstTs = orig[0]?.ts ?? Date.now();
     const hist = [{ ts: firstTs, rate: 0, choice: null }, ...orig.map(p => ({
@@ -574,7 +568,7 @@ function drawPrevSessions() {
   }
 }
 
-// ==== 連結グラフ（最大4件）※今まで通り（finalRateをセッション色でつなぐ） ====
+// ==== 連結グラフ（最大4件）※セッション色で線＋最終点表示（前の仕様） ====
 function drawSessionChain() {
   if (!sessionChainCanvas || !sessionChainCtx) return;
 
@@ -585,6 +579,7 @@ function drawSessionChain() {
   sessionChainCtx.fillStyle = "#ffffff";
   sessionChainCtx.fillRect(0, 0, w, h);
 
+  // 最大4件の「過去セッション」
   const sessionsNewestFirst = prevSessions.slice(0, 4);
   const sessionsOldestFirst = sessionsNewestFirst
     .slice()
@@ -600,15 +595,14 @@ function drawSessionChain() {
     return;
   }
 
+  // 0%スタート + 各セッション最終値
   const chainPoints = [];
-  const firstSessionColor = sessionsOldestFirst[0].color || SESSION_COLORS[0];
+  const firstColor = sessionsOldestFirst[0].color || SESSION_COLORS[0];
+  chainPoints.push({ rate: 0, color: firstColor, isSessionPoint: false });
 
-  // 0%スタート
-  chainPoints.push({ rate: 0, color: firstSessionColor, isSessionPoint: false });
-
-  sessionsOldestFirst.forEach((session, idx) => {
+  sessionsOldestFirst.forEach(session => {
     const r = clamp100(Number(session.finalRate ?? 0));
-    const color = session.color || SESSION_COLORS[Math.min(idx, SESSION_COLORS.length - 1)];
+    const color = session.color || SESSION_COLORS[0];
     chainPoints.push({ rate: r, color, isSessionPoint: true });
   });
 
@@ -650,6 +644,7 @@ function drawSessionChain() {
 
   const stepX = plotW / Math.max(1, chainPoints.length - 1);
 
+  // セッション色で線を引く（次点の色）
   let lastX = null;
   let lastY = null;
 
@@ -662,7 +657,6 @@ function drawSessionChain() {
       return;
     }
 
-    // ✅ 連結は今まで通り「セッション色」
     sessionChainCtx.strokeStyle = pt.color;
     sessionChainCtx.lineWidth = 4;
     sessionChainCtx.beginPath();
@@ -673,6 +667,7 @@ function drawSessionChain() {
     lastX = x; lastY = y;
   });
 
+  // 最終興味度点＋%表示（前の仕様）
   const pointRadius = 7;
   chainPoints.forEach((pt, idx) => {
     if (!pt.isSessionPoint) return;
@@ -719,7 +714,7 @@ function renderCommentTimeline(currentComments) {
 
   const pastItems = [];
   prevSessions.forEach(s => {
-    const label = `${s.resetNo}回目のリセットセッション`;
+    const label = `${s.resetNo}回目セッション`;
     const color = s.color || "#888";
     const comments = normalizeComments(s.comments || []);
     comments.forEach(c => {
@@ -855,32 +850,31 @@ if (btnSaveTheme && themeInput) {
 }
 
 // ==== 投票リセット（セッション単位） ====
-// ※ server.js 側で sessionId が進むので、admin.js 側はレスポンスの sessionId で同期する
 if (btnReset) {
   btnReset.addEventListener("click", async () => {
     const ok = confirm("現在セッションの票・コメント・グラフをリセットします。\n本当に実行しますか？");
     if (!ok) return;
 
     try {
-      const currentColor = getCurrentColor();
+      // いま終わるセッション番号（= resetCount+1）
+      const endedSessionNo = resetCount + 1;
 
+      // ✅ 過去セッション保存（前の仕様：1青2赤3緑4黄）
       if (history.length > 0) {
         const lastRate = clamp100(history[history.length - 1].rate);
 
-        // ✅ 過去セッションに「choice」付きで保存（現在セッションと同じ仕組み）
         const copy = history.map(p => ({
           ts: safeTs(p.ts),
           rate: clamp100(p.rate),
           choice: p.choice ?? null,
         }));
 
-        const resetNo = resetCount + 1;
         const savedComments = normalizeComments(latestCurrentComments);
 
         prevSessions.unshift({
-          resetNo,
-          color: currentColor,   // 連結グラフ用のセッション色（従来通り）
-          points: copy,          // ✅ choice も保存
+          resetNo: endedSessionNo,
+          color: sessionNoToColor(endedSessionNo), // ★固定の色順
+          points: copy,
           finalRate: lastRate,
           comments: savedComments,
         });
@@ -892,19 +886,21 @@ if (btnReset) {
         renderCommentTimeline([]);
       }
 
+      // サーバリセット（sessionId が進む）
       const res = await fetch("/api/admin/reset", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset");
 
-      // ✅ server の sessionId に同期（重要）
+      // server sessionId 同期（これで resetCount も正しく次へ進む）
       let newSid = null;
       try {
         const j = await res.json();
         newSid = Number(j?.sessionId);
       } catch {}
       if (Number.isFinite(newSid)) {
-        onServerSessionChanged(newSid);
+        currentServerSessionId = newSid;
+        syncWithServerSessionId(newSid);
       } else {
-        // もし sessionId が返らない環境でも破綻しないように
+        // もし sessionId が返らない場合でも最低限動く
         resetCount++;
         history = [];
         latestCurrentComments = [];
@@ -913,9 +909,6 @@ if (btnReset) {
         lastActionChoice = null;
         ensureBasePoint();
       }
-
-      // 見た目セッション色のローテは従来通り
-      resetCount++;
 
       await fetchResults();
       drawPrevSessions();
@@ -939,7 +932,6 @@ if (btnResetAll) {
       const res = await fetch("/api/admin/reset-all", { method: "POST" });
       if (!res.ok) throw new Error("failed to reset all");
 
-      // server の sessionId に同期
       let sid = null;
       try {
         const j = await res.json();
@@ -948,7 +940,6 @@ if (btnResetAll) {
 
       history = [];
       prevSessions = [];
-      resetCount = 0;
       latestCurrentComments = [];
       basePointInserted = false;
 
@@ -960,9 +951,11 @@ if (btnResetAll) {
       renderCommentTimeline([]);
 
       if (Number.isFinite(sid)) {
-        onServerSessionChanged(sid);
+        currentServerSessionId = sid;
+        syncWithServerSessionId(sid); // => resetCount = sid-1（通常 0）
       } else {
         currentServerSessionId = null;
+        resetCount = 0;
         ensureBasePoint();
       }
 
